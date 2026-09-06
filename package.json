@@ -3,6 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "license": "MIT",
+  "author": "Alex Howansky",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AlexHowansky/ork-hero-initiative-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AlexHowansky/ork-hero-initiative-manager/issues"
+  },
+  "homepage": "https://github.com/AlexHowansky/ork-hero-initiative-manager#readme",
   "type": "module",
   "scripts": {
     "dev": "bun --hot src/server/index.ts",
