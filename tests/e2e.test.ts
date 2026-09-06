@@ -181,9 +181,8 @@ const clock = (page: Page, pattern: RegExp) =>
  * The row whose turn it is.
  *
  * Which is how either screen says who is up, now that the bar says only where
- * the clock stands: the console banners the row and a player's list badges it,
- * and both mark it `aria-current`, which is the part that means it rather than
- * draws it.
+ * the clock stands: both screens banner the row across its corner, and both
+ * mark it `aria-current`, which is the part that means it rather than draws it.
  */
 const onTurn = (page: Page) => stagePanel(page).locator('li[aria-current="true"]');
 

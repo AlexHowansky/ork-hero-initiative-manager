@@ -1075,7 +1075,7 @@ export function CharacterThumb({
     </span>
   );
 
-  // The big square, for a list whose rows are three lines tall.
+  // The big square, for the stage rows on both session screens.
   //
   // A size rather than `h-full aspect-square`: a flex row works out its items'
   // widths before it stretches their heights, so an item asking to be square

@@ -156,8 +156,8 @@ function Row({
     >
       {/* Whose turn it is, written across the corner of the row like a banner
           rather than badged in beside the name. The row already carries the
-          colour and the heavy left border; this is the part a game master
-          glancing down a full stage picks out before reading anything.
+          colour and the heavy left border; this is the part a reader glancing
+          down a full stage picks out before reading anything.
 
           Wider than the corner it crosses and hung outside the row on both
           sides, so the row's own `overflow-hidden` cuts it to the diagonal — a
@@ -165,11 +165,12 @@ function Row({
           `pointer-events-none` because it crosses the row number, and a banner
           is not something to press.
 
-          The game master's list only: it wants a corner to cross, and a player's
-          row is two lines where the game master's is three — the banner would
-          land on the number rather than above it. That list keeps the badge
-          below, beside the name. */}
-      {isActive && editable ? (
+          Both lists, so the two screens say whose turn it is in the same words
+          in the same corner. It wants a corner to cross, though: on a row much
+          shorter than this one the ribbon comes down across the number instead
+          of above it, which is why a player's row is as tall as the game
+          master's — see the picture below. */}
+      {isActive ? (
         <span className="pointer-events-none absolute top-2.5 -left-9 w-28 rotate-[-45deg] bg-primary py-0.5 text-center text-[0.625rem] font-bold tracking-widest text-primary-content uppercase shadow-sm">
           Turn
         </span>
@@ -185,20 +186,23 @@ function Row({
         {index + 1}
       </span>
 
-      {/* The game master's list gets the big square, which is about as tall as
-          the three lines of text beside it and so fills the row without the
-          layout having to be told the row's height — see `CharacterThumb`, where
-          why it is a size rather than a ratio is written down.
+      {/* The big square, which is about as tall as the three lines of text
+          beside it and so fills the row without the layout having to be told the
+          row's height — see `CharacterThumb`, where why it is a size rather than
+          a ratio is written down.
 
-          A player's row is one or two lines rather than three, so that list
-          keeps the small thumb: the big one would be the tallest thing in the
-          row and would set the height of every row in the list. */}
-      <CharacterThumb fill={editable} kind={character.kind} cardUrl={character.cardUrl} />
+          Both lists, and on a player's it is the tallest thing in the row: a
+          player's row has two lines of text where the game master's has three,
+          and the height the picture sets is the corner the turn ribbon above
+          needs. The card art is worth the pixels on that screen anyway — it is
+          the one place a player sees everybody at the table. */}
+      <CharacterThumb fill kind={character.kind} cardUrl={character.cardUrl} />
 
       {/* Everything there is to read about this character, in three lines: who
-          they are, what they are, and what they have left. The column is what
-          sets the height of the row, so it carries no minimum of its own — a
-          player's row, which has no numbers to draw, is simply shorter. */}
+          they are, what they are, and what they have left. Two lines on a
+          player's row, which has no numbers to draw, so this column carries no
+          minimum of its own: on that screen the picture beside it is the taller
+          of the two and the row is as tall as the game master's either way. */}
       <div className="flex min-w-0 flex-1 flex-col justify-center gap-1">
         {/* Badges wrap below the name rather than crowding it out: with a picture
             and three of them, the game master's narrower column runs out of room.
@@ -223,13 +227,6 @@ function Row({
             <CountBadge hidden>{character.copyNumber}</CountBadge>
           ) : null}
           <KindBadge kind={character.kind} />
-          {isActive && !editable ? (
-            // The badge the game master's row wears as a banner across its
-            // corner. Same word, in the room a shorter row has for it.
-            <span className="badge badge-xs badge-primary font-semibold tracking-wide uppercase">
-              Turn
-            </span>
-          ) : null}
           {isUnclaimed ? (
             <span className="badge badge-xs badge-error badge-soft font-semibold tracking-wide uppercase">
               Unclaimed
