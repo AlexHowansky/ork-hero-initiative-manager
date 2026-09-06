@@ -9,6 +9,9 @@ claimed yet.
 Built on Bun 1.4, SQLite, React 19, Tailwind v4 and daisyUI 5. One process, one
 database file, no external services.
 
+![GM Library view](doc/library.webp)
+![GM Session view](doc/gm_session.webp)
+
 ## Getting started
 
 ```bash
