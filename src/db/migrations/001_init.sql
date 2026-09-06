@@ -1,4 +1,4 @@
--- Initial schema for the HERO Initiative Tracker.
+-- Initial schema for the HERO Initiative Manager.
 
 -- Administrative users. Created only through the CLI; there is no account UI.
 CREATE TABLE gms (
