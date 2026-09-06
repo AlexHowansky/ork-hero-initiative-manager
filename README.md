@@ -1566,3 +1566,17 @@ Chromium (`bunx playwright install chromium`) and are skipped without it.
 In development you may see a console warning that an inline script was blocked
 by the page CSP. That is Bun's hot-reload injection; the production build
 contains no inline scripts.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
+
+Font Awesome's free icons are bundled under the terms of their own license: the
+icon artwork is [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) and
+the surrounding code is MIT, both © Fonticons, Inc. Everything else under
+`art/` and `assets/` is original to this project and covered by the MIT license
+above.
+
+This project is not affiliated with, endorsed by, or sponsored by Hero Games.
+HERO System and Champions are trademarks of their respective owners; they are
+used here only to describe what the tool is for.

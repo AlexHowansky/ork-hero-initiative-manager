@@ -2,6 +2,7 @@
   "name": "ork-hero-initiative-manager",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "bun --hot src/server/index.ts",
