@@ -2264,7 +2264,7 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
     // the boundary the sandbox is there to draw.
     const cookieAccess = await player
       .frames()
-      .find((entry) => entry.url().includes("/sheets/"))!
+      .find((entry) => entry.url().includes("/characters/"))!
       .evaluate(() => {
         try {
           return { blocked: false, value: document.cookie };

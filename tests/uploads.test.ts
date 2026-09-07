@@ -54,6 +54,15 @@ describe("character files", () => {
     expect(upload.original_name).not.toContain("/");
   });
 
+  test("are kept in the directory character files are kept in", async () => {
+    const upload = await storeSheet(hdcFile());
+
+    // Named for what is stored rather than for what is served: the file is a
+    // character, and the sheet is rendered from it on demand and never written
+    // down.
+    expect(dirname(upload.disk_path)).toBe("characters");
+  });
+
   test("are named on disk after the row that describes them", async () => {
     const upload = await storeSheet(hdcFile());
 

@@ -31,7 +31,7 @@ import type { HeroStatField } from "../lib/hero.ts";
 import { uploads } from "../db/queries.ts";
 import type { UploadRow } from "../db/types.ts";
 
-const SHEET_DIR = resolve(config.uploadDir, "sheets");
+const CHARACTER_DIR = resolve(config.uploadDir, "characters");
 const IMAGE_DIR = resolve(config.uploadDir, "images");
 
 /**
@@ -47,7 +47,7 @@ export function uploadPath(row: Pick<UploadRow, "disk_path">): string {
   return isAbsolute(row.disk_path) ? row.disk_path : resolve(config.uploadDir, row.disk_path);
 }
 
-await mkdir(SHEET_DIR, { recursive: true });
+await mkdir(CHARACTER_DIR, { recursive: true });
 await mkdir(IMAGE_DIR, { recursive: true });
 
 /** Magic-byte signatures, so an image is checked by content rather than by name. */
@@ -111,7 +111,7 @@ async function persist(
   const row = uploads.create({
     id,
     kind,
-    diskPath: join(kind === "image" ? "images" : "sheets", id),
+    diskPath: join(kind === "image" ? "images" : "characters", id),
     mime,
     byteSize: bytes.byteLength,
     sha256: sha256(bytes),
@@ -193,7 +193,7 @@ export async function storeSheet(file: File): Promise<UploadRow> {
   const bytes = await readWithLimit(file, limits.uploadBytes, "character file");
   if (bytes.byteLength === 0) throw errors.badRequest("That character file was empty.");
   parseHdc(bytes, name);
-  return await persist(bytes, SHEET_DIR, "sheet", HDC_MIME, name);
+  return await persist(bytes, CHARACTER_DIR, "sheet", HDC_MIME, name);
 }
 
 /**
@@ -471,13 +471,13 @@ export async function collectOrphanedUploads(): Promise<number> {
  * its row failed to, and from a database restored from a backup older than the
  * files beside it. Nothing swept for them before `db:gc`.
  *
- * The scan lives here because `SHEET_DIR` and `IMAGE_DIR` do — where the files
+ * The scan lives here because `CHARACTER_DIR` and `IMAGE_DIR` do — where the files
  * are kept is this module's business and nobody else's.
  */
 export async function findStrayFiles(): Promise<string[]> {
   const claimed = new Set(uploads.all().map(uploadPath));
   const stray: string[] = [];
-  for (const directory of [SHEET_DIR, IMAGE_DIR]) {
+  for (const directory of [CHARACTER_DIR, IMAGE_DIR]) {
     for (const name of await readdir(directory)) {
       const path = join(directory, name);
       if (!claimed.has(path)) stray.push(path);

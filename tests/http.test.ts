@@ -191,7 +191,7 @@ describe("nothing is reachable without signing in", () => {
     const { cookie } = await signIn();
     const { pc } = await makeTable(cookie);
 
-    expect((await fetch(`${base}/sheets/${pc.id}`)).status).toBe(404);
+    expect((await fetch(`${base}/characters/${pc.id}`)).status).toBe(404);
     expect((await fetch(`${base}/uploads/images/anything`)).status).toBe(401);
   });
 
@@ -216,7 +216,7 @@ describe("one game master cannot see another's material", () => {
     expect(
       (await fetch(`${base}/api/sessions/${session.id}`, authed(stranger.cookie))).status,
     ).toBe(404);
-    expect((await fetch(`${base}/sheets/${pc.id}`, authed(stranger.cookie))).status).toBe(404);
+    expect((await fetch(`${base}/characters/${pc.id}`, authed(stranger.cookie))).status).toBe(404);
     expect(
       (await fetch(
         `${base}/api/campaigns/${campaign.id}`,
@@ -346,7 +346,7 @@ describe("character sheets reach only the right people", () => {
   };
 
   const status = async (id: string, cookie: string) =>
-    (await fetch(`${base}/sheets/${id}`, { headers: { Cookie: cookie } })).status;
+    (await fetch(`${base}/characters/${id}`, { headers: { Cookie: cookie } })).status;
 
   test("a player is refused every sheet but their own", async () => {
     const { alice, other, npc } = await table();
@@ -369,7 +369,7 @@ describe("character sheets reach only the right people", () => {
     const gm = await signIn();
     const { pc } = await makeTable(gm.cookie);
 
-    const response = await fetch(`${base}/sheets/${pc.id}`, { headers: { Cookie: gm.cookie } });
+    const response = await fetch(`${base}/characters/${pc.id}`, { headers: { Cookie: gm.cookie } });
     const policy = response.headers.get("content-security-policy") ?? "";
 
     // The sheet is this app's own output now, rather than an uploaded document —
@@ -396,7 +396,7 @@ describe("character sheets reach only the right people", () => {
         "WHERE id = (SELECT sheet_upload_id FROM characters WHERE id = ?)",
     ).run(pc.id);
 
-    const response = await fetch(`${base}/sheets/${pc.id}`, { headers: { Cookie: gm.cookie } });
+    const response = await fetch(`${base}/characters/${pc.id}`, { headers: { Cookie: gm.cookie } });
     expect(response.status).toBe(404);
     expect((await response.json()).error.message).toMatch(/\.hdc/);
   });

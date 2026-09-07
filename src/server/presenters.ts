@@ -47,7 +47,7 @@ export function presentCharacter(character: CharacterRow) {
     campaignId: character.campaign_id,
     kind: character.kind,
     name: character.name,
-    sheetUrl: `/sheets/${character.id}`,
+    sheetUrl: `/characters/${character.id}`,
     cardUrl: character.card_upload_id
       ? `/uploads/images/${character.card_upload_id}`
       : null,

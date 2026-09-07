@@ -52,8 +52,8 @@ export const fileRoutes = {
    * and drop the file back, and the next person to look sees the new one, with
    * nothing to invalidate.
    */
-  "/sheets/:characterId": {
-    GET: handler(async (request: BunRequest<"/sheets/:characterId">) => {
+  "/characters/:characterId": {
+    GET: handler(async (request: BunRequest<"/characters/:characterId">) => {
       const { characterId } = request.params;
       const character = characters.byId(characterId);
       if (!character) throw errors.notFound("We couldn't find that character sheet.");
