@@ -894,3 +894,29 @@ body {
   position: relative;
   z-index: 1;
 }
+
+/*
+  The select's second caret.
+
+  The fifth of these, and the same story as the range, the toggle, the file field
+  and the aura above: the development server nests daisyUI's rules under a
+  pseudo-element and browsers resolve none of them.
+
+  What is nested this time is one declaration with one job. daisyUI opts every
+  select into Chrome's customizable-select rendering — `appearance: base-select`,
+  behind an `@supports` — and that rendering draws a chevron of its own, on top of
+  the caret daisyUI paints for itself with two background gradients. So daisyUI
+  hides it: `:is(.select, .select select)::picker-icon { display: none }`. Nested
+  under a pseudo-element, that rule is dropped, and a select is drawn with two
+  carets side by side — a solid triangle and a thin chevron.
+
+  Only browsers new enough for `base-select` see it at all, which is why it turns
+  up on a game master's Chrome and not in the Chromium the browser tests drive.
+
+  Delete with the other four when Bun's dev pipeline stops nesting under
+  pseudo-elements.
+*/
+.select::picker-icon,
+.select select::picker-icon {
+  display: none;
+}
