@@ -24,7 +24,7 @@ import {
 } from "../../lib/hero.ts";
 import type { HeroStatField } from "../../lib/hero.ts";
 import { compareNames } from "../../lib/names.ts";
-import { statsFromSheetHtml } from "../../lib/sheet-stats.ts";
+import { splitCharacterFile, type SplitCharacter } from "../hdc.ts";
 import { useSessionSocket } from "../useSessionSocket.ts";
 import { useLiveSessions } from "../useLiveSessions.ts";
 import { measureTrack, useCardFit } from "../useCardFit.ts";
@@ -76,7 +76,7 @@ const NAME_MAX_LENGTH = 60;
  *
  * The extension goes; nothing else about the filename is second-guessed. Empty
  * when the filename was nothing but an extension, which is the one case the
- * caller has to answer for — a dropped sheet cannot be filed without a name, and
+ * caller has to answer for — a dropped character file cannot be filed without a name, and
  * the dialog simply leaves its field alone.
  */
 function characterNameFor(file: File): string {
@@ -214,25 +214,46 @@ function CharacterForm({
   };
 
   /**
-   * Fills the characteristics in from the sheet, when the sheet is one that says
-   * what they are.
+   * The chosen file taken apart — the character on its own, and its picture.
+   *
+   * Held from the moment the file is chosen, because both halves of the dialog
+   * want it: the characteristics are read off it immediately, and it is what is
+   * actually uploaded when the form is submitted. Splitting it twice would mean
+   * decoding several megabytes twice.
+   *
+   * The file it was made from is kept beside it. Splitting is asynchronous, so a
+   * game master who picks a second file and submits before it finishes would
+   * otherwise upload the *first* character under the second one's name — and
+   * both are valid files, so nothing downstream could tell.
+   */
+  const split = useRef<{ source: File; parts: SplitCharacter } | null>(null);
+
+  /**
+   * Fills the characteristics in from the character file.
    *
    * Over whatever is in the boxes, including numbers the game master typed a
    * moment ago and the ones a character being edited arrived with: choosing a
-   * sheet is choosing what this character is, and a sheet that knows its own SPD
-   * is a better authority on it than a box somebody filled from an older export.
-   * That is the whole point of uploading a replacement.
+   * file is choosing what this character is, and the file is a better authority
+   * on its own SPD than a box somebody filled from an older export. That is the
+   * whole point of uploading a replacement.
    *
-   * Only what the sheet actually answered. A characteristic it does not give a
-   * usable number for is left exactly as it was, and an unmarked sheet — anyone
-   * else's export, or a page somebody wrote by hand — changes nothing at all.
+   * Worked out by the server, which has the game system's rules — the browser
+   * sends the file with its portrait already taken out, so what crosses the wire
+   * is tens of kilobytes rather than the megabytes the file weighs.
    *
    * It says nothing when it works. The numbers appearing in the boxes is the
    * message, and they are still the game master's to correct before saving.
    */
   const readStatsFrom = async (file: File) => {
     try {
-      const found = statsFromSheetHtml(await file.text());
+      const parts = await splitCharacterFile(file);
+      split.current = { source: file, parts };
+
+      const body = new FormData();
+      body.set("hdc", parts.hdc);
+      const { stats: found } = await api.postForm<{
+        stats: Partial<Record<HeroStatField, number>>;
+      }>("/api/characters/stats", body);
       if (Object.keys(found).length > 0) setStats((current) => ({ ...current, ...found }));
     } catch {
       // An unreadable file is one the upload itself is about to complain about,
@@ -243,6 +264,23 @@ function CharacterForm({
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
+
+    // The file input still holds the file as it was chosen, portrait and all.
+    // What goes up is the split of it made when it was chosen: the character on
+    // its own, and its picture sized for a card, as a part the server knows not
+    // to mistake for a picture the game master picked by hand.
+    //
+    // Only when the split is of the file that is actually in the input. If it is
+    // not — a second file picked while the first was still being split — the
+    // original goes up whole and the server takes it apart itself, which is
+    // slower and entirely correct.
+    const chosen = form.get("sheet");
+    const held = split.current;
+    if (held && chosen instanceof File && chosen === held.source) {
+      form.set("sheet", held.parts.hdc);
+      if (held.parts.portrait) form.set("sheetPortrait", held.parts.portrait);
+    }
+
     setBusy(true);
     try {
       const result = character
@@ -262,12 +300,12 @@ function CharacterForm({
   return (
     <form onSubmit={submit} className="space-y-4">
       <FileDrop
-        label={`Character sheet ${
-          character ? "(leave empty to keep the current one)" : "(HTML file)"
+        label={`Character file ${
+          character ? "(leave empty to keep the current one)" : "(.hdc from HERO Designer)"
         }`}
         name="sheet"
-        accept=".html,.htm,text/html"
-        hint="Sheets keep their own scripts and styling. They are displayed in an isolated frame, so they cannot interact with the rest of this app. A picture inside a sheet becomes the character's card, and is taken out of the sheet rather than stored twice."
+        accept=".hdc"
+        hint="The character sheet is drawn from this file every time it is opened, so re-exporting a character and uploading them again is all it takes to keep their sheet current. The picture inside the file becomes the character's card, and is taken out of the file rather than stored twice."
         onFile={(file) => {
           suggestNameFrom(file);
           void readStatsFrom(file);
@@ -785,21 +823,21 @@ export function GmLibrary({ email, onSignOut }: { email: string; onSignOut: () =
   );
 
   /**
-   * Files sheets dropped on the character panel as characters, there and then.
+   * Files character files dropped on the character panel as characters, there and then.
    *
    * Everything the add dialog would have asked for is already known: the panel
    * only exists while a campaign is selected, the file names the character the
    * way the dialog's own name field would have, and a dropped character is an NPC
    * until it is edited — the same default the dialog offers, and for the same
-   * reason: a folder of sheets dropped on a campaign is a folder of monsters far
+   * reason: a folder of character files dropped on a campaign is a folder of monsters far
    * more often than it is a party. So the dialog would have been a form with nothing left
-   * to fill in, and a folder of sheets can be filed by dropping the folder.
+   * to fill in, and a folder of characters can be filed by dropping the folder.
    *
    * A name the campaign already has is that character being *updated*, not a
    * collision. Re-exporting from HERO Designer and dropping the file back is how
-   * a sheet is kept current, and the alternative was finding each character,
+   * a character is kept current, and the alternative was finding each character,
    * opening its dialog and picking the file by hand. So the file replaces the
-   * stored sheet, the characteristics inside it replace the character's, and the
+   * stored one, the characteristics inside it replace the character's, and the
    * portrait inside it replaces the picture — the dropped file is the whole of
    * the intent, and there is nothing in the gesture that could mean "but keep the
    * old picture". What it leaves alone is the kind: a monster dropped over a hero
@@ -811,9 +849,9 @@ export function GmLibrary({ email, onSignOut }: { email: string; onSignOut: () =
    * loaded is not in it; that file takes the create path and gets the conflict it
    * always did, which a reload puts right.
    *
-   * Every dropped file is handled one request at a time — the server takes a
-   * portrait out of each sheet, and a dozen of those at once is a dozen image
-   * decodes racing each other for no gain. Each character appears as it lands,
+   * Every dropped file is handled one request at a time — each one is taken
+   * apart and its picture re-encoded, and a dozen of those at once is a dozen
+   * image decodes racing each other for no gain. Each character appears as it lands,
    * in name order, so the panel fills in as the batch goes. One failure is
    * reported and the rest carry on.
    */
@@ -835,8 +873,13 @@ export function GmLibrary({ email, onSignOut }: { email: string; onSignOut: () =
             entry.name.localeCompare(name, undefined, { sensitivity: "base" }) === 0,
         );
 
+        // Split before uploading, as the dialog does: the picture goes as its
+        // own part, sized for a card, and what is left of the character file is
+        // a fraction of what was dropped.
+        const parts = await splitCharacterFile(file);
         const form = new FormData();
-        form.set("sheet", file);
+        form.set("sheet", parts.hdc);
+        if (parts.portrait) form.set("sheetPortrait", parts.portrait);
 
         if (existing) {
           // Neither the name nor the campaign, which are what found this
@@ -1016,7 +1059,7 @@ export function GmLibrary({ email, onSignOut }: { email: string; onSignOut: () =
    * It says nothing when it works. The card redrawing itself in the other frame
    * — new artwork, and the foil arriving or leaving with it — is the whole of the
    * answer, and a toast on top of a change the reader is already looking at is
-   * one more thing to dismiss while sorting a folder of sheets a key at a time.
+   * one more thing to dismiss while sorting a folder of characters a key at a time.
    * A failure still speaks, because that is the case where nothing visible
    * happens.
    *
@@ -1194,7 +1237,7 @@ export function GmLibrary({ email, onSignOut }: { email: string; onSignOut: () =
                     aria-live="polite"
                   >
                     <span className="loading loading-spinner loading-xs" aria-hidden="true" />
-                    {filing === 1 ? "Filing 1 sheet…" : `Filing ${filing} sheets…`}
+                    {filing === 1 ? "Filing 1 character…" : `Filing ${filing} characters…`}
                   </p>
                 ) : null}
 

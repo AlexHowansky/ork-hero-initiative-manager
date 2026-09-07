@@ -14,7 +14,7 @@ import { serverOptions } from "../src/server/app.ts";
 import { registerServer } from "../src/server/ws.ts";
 import { gms } from "../src/db/queries.ts";
 import { CARD_IMAGE_PX } from "../src/lib/cards.ts";
-import { unique } from "./helpers.ts";
+import { hdcBytes, rulesAvailable, unique } from "./helpers.ts";
 
 const PASSWORD = "a-sufficiently-long-password";
 const email = `${unique("gm")}@example.com`;
@@ -91,10 +91,10 @@ async function gmWithSession(): Promise<{ page: Page; code: string; campaignName
     await page.getByRole("button", { name: "Add", exact: true }).click();
     await page.getByLabel("Name").fill(name);
     await page.getByLabel("Type").selectOption(kind);
-    await page.getByLabel(/Character sheet/).setInputFiles({
-      name: "sheet.html",
-      mimeType: "text/html",
-      buffer: Buffer.from(`<h1>${name}</h1><script>window.loaded = true;</script>`),
+    await page.getByLabel(/Character file/).setInputFiles({
+      name: "sheet.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(hdcBytes({ name }) as Uint8Array<ArrayBuffer>),
     });
     // Characteristics, so the session screens have totals to count down from.
     await page.getByLabel("SPD", { exact: true }).fill(String(speed));
@@ -1422,10 +1422,10 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
     await gm.getByRole("button", { name: "Add", exact: true }).click();
     await gm.getByLabel("Name").fill("Goblin");
     await gm.getByLabel("Type").selectOption("npc");
-    await gm.getByLabel(/Character sheet/).setInputFiles({
-      name: "sheet.html",
-      mimeType: "text/html",
-      buffer: Buffer.from("<h1>Goblin</h1>"),
+    await gm.getByLabel(/Character file/).setInputFiles({
+      name: "sheet.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(hdcBytes({ name: "Goblin" }) as Uint8Array<ArrayBuffer>),
     });
     await gm.getByRole("button", { name: "Add character" }).last().click();
     await gm.getByRole("button", { name: "Goblin", exact: true }).waitFor();
@@ -1460,10 +1460,10 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
     // player character's frame and its foil, so it has to ask for one.
     await gm.getByLabel("Type").selectOption("pc");
     await gm.getByLabel("Name").fill("Framed");
-    await gm.getByLabel(/Character sheet/).setInputFiles({
-      name: "sheet.html",
-      mimeType: "text/html",
-      buffer: Buffer.from("<h1>Framed</h1>"),
+    await gm.getByLabel(/Character file/).setInputFiles({
+      name: "sheet.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(hdcBytes({ name: "Framed" }) as Uint8Array<ArrayBuffer>),
     });
     await gm.getByRole("button", { name: "Add character" }).last().click();
     await gm.getByRole("button", { name: "Framed", exact: true }).waitFor();
@@ -1582,11 +1582,11 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
     for (const name of ["Hero", "Bystander"]) {
       await gm.getByRole("button", { name: "Add", exact: true }).click();
       await gm.getByLabel("Name").fill(name);
-      await gm.getByLabel(/Character sheet/).setInputFiles({
-        name: "sheet.html",
-        mimeType: "text/html",
-        buffer: Buffer.from(`<h1>${name}</h1>`),
-      });
+      await gm.getByLabel(/Character file/).setInputFiles({
+      name: "sheet.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(hdcBytes({ name }) as Uint8Array<ArrayBuffer>),
+    });
       await gm.getByRole("button", { name: "Add character" }).last().click();
       await gm.getByRole("button", { name, exact: true }).waitFor();
     }
@@ -1658,10 +1658,10 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
 
     await gm.getByRole("button", { name: "Add", exact: true }).click();
     await gm.getByLabel("Name").fill("Pippin");
-    await gm.getByLabel(/Character sheet/).setInputFiles({
-      name: "sheet.html",
-      mimeType: "text/html",
-      buffer: Buffer.from("<h1>Pippin</h1>"),
+    await gm.getByLabel(/Character file/).setInputFiles({
+      name: "sheet.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(hdcBytes({ name: "Pippin" }) as Uint8Array<ArrayBuffer>),
     });
     await gm.getByRole("button", { name: "Add character" }).last().click();
     await gm.getByRole("button", { name: "Pippin", exact: true }).waitFor();
@@ -1703,10 +1703,10 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
 
     await gm.getByRole("button", { name: "Add", exact: true }).click();
     await gm.getByLabel("Name").fill("Turncoat");
-    await gm.getByLabel(/Character sheet/).setInputFiles({
-      name: "sheet.html",
-      mimeType: "text/html",
-      buffer: Buffer.from("<h1>Turncoat</h1>"),
+    await gm.getByLabel(/Character file/).setInputFiles({
+      name: "sheet.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(hdcBytes({ name: "Turncoat" }) as Uint8Array<ArrayBuffer>),
     });
     for (const [label, value] of stats) {
       await gm.getByLabel(label, { exact: true }).fill(String(value));
@@ -1860,7 +1860,7 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
         labels.map((label) => label.querySelector("span")?.textContent?.trim() ?? ""),
       );
     expect(captions).toEqual([
-      "Character sheet (HTML file)",
+      "Character file (.hdc from HERO Designer)",
       "Name",
       "Type",
       "Campaign",
@@ -1891,20 +1891,18 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
     // one evaluation: resolving it in an earlier round trip can hand back a node
     // React has since replaced, and an event dispatched at a detached node
     // reaches nothing. Two files, because a drop files everything it carries.
-    await gm.evaluate(() => {
+    await gm.evaluate((files: number[][]) => {
       const panel = Array.from(document.querySelectorAll("section")).find((section) =>
         section.textContent?.startsWith("Characters in"),
       );
       if (!panel) throw new Error("the character panel is not on the page");
 
       const transfer = new DataTransfer();
-      transfer.items.add(
-        new File(["<h1>Gimli</h1>"], "Gimli son of Gloin.html", { type: "text/html" }),
-      );
-      transfer.items.add(new File(["<h1>Legolas</h1>"], "Legolas.html", { type: "text/html" }));
+      transfer.items.add(new File([new Uint8Array(files[0]!)], "Gimli son of Gloin.hdc"));
+      transfer.items.add(new File([new Uint8Array(files[1]!)], "Legolas.hdc"));
       panel.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: transfer }));
       panel.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
-    });
+    }, [[...hdcBytes({ name: "Gimli" })], [...hdcBytes({ name: "Legolas" })]]);
 
     // Both are filed there and then, each named after its file, with no dialog
     // in the way and nothing left to confirm.
@@ -1915,30 +1913,25 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
     expect(await gm.getByRole("dialog").count()).toBe(0);
 
     // The same names again, which is a re-export being dropped back rather than a
-    // collision. This time the sheets carry characteristics, so there is
+    // collision. This time the files carry characteristics, so there is
     // something to see change.
-    await gm.evaluate(() => {
+    await gm.evaluate((files: number[][]) => {
       const panel = Array.from(document.querySelectorAll("section")).find((section) =>
         section.textContent?.startsWith("Characters in"),
       );
       if (!panel) throw new Error("the character panel is not on the page");
 
-      const sheet = (dex: number) => [
-        "<!--\n\nGenerated by Ork HERO Templates\n\n-->",
-        '<div id="characteristics-collapse"><table><tbody>',
-        `<tr><td><span class="primary">${dex}</span></td><td>DEX</td></tr>`,
-        "<tr><td>6</td><td>SPD</td></tr>",
-        "</tbody></table></div>",
-      ].join("\n");
-
       const transfer = new DataTransfer();
-      transfer.items.add(
-        new File([sheet(19)], "Gimli son of Gloin.html", { type: "text/html" }),
-      );
-      transfer.items.add(new File([sheet(24)], "Legolas.html", { type: "text/html" }));
+      transfer.items.add(new File([new Uint8Array(files[0]!)], "Gimli son of Gloin.hdc"));
+      transfer.items.add(new File([new Uint8Array(files[1]!)], "Legolas.hdc"));
       panel.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: transfer }));
       panel.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
-    });
+    }, [
+      // A file stores levels bought, and SPD's base is figured from DEX — so
+      // these two reach the same SPD of 6 from different levels.
+      [...hdcBytes({ name: "Gimli", characteristics: { DEX: 9, SPD: 4 } })],
+      [...hdcBytes({ name: "Legolas", characteristics: { DEX: 14, SPD: 3 } })],
+    ]);
 
     // Updated rather than refused, and said so in those words.
     await gm.getByText("Updated 2 characters.").waitFor({ timeout: 5000 });
@@ -1949,7 +1942,7 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
       .toBe(1);
     expect(await gm.getByRole("button", { name: "Legolas", exact: true }).count()).toBe(1);
 
-    // And the numbers came off the dropped file, which the first sheets did not
+    // And the numbers came off the dropped file, which the first ones did not
     // carry at all.
     await gm.getByRole("button", { name: "Edit Legolas" }).click();
     expect(await gm.getByLabel("DEX", { exact: true }).inputValue()).toBe("24");
@@ -1967,29 +1960,29 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
     await gm.getByText(`Characters in ${campaignName}`).waitFor();
 
     await gm.getByRole("button", { name: "Add", exact: true }).click();
-    await gm.getByLabel(/Character sheet/).setInputFiles({
-      name: "Bilbo Baggins.html",
-      mimeType: "text/html",
-      buffer: Buffer.from("<h1>Bilbo</h1>"),
+    await gm.getByLabel(/Character file/).setInputFiles({
+      name: "Bilbo Baggins.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(hdcBytes({ name: "Bilbo" }) as Uint8Array<ArrayBuffer>),
     });
 
     // The name is filled in from the file, extension and all else left behind.
     expect(await gm.getByLabel("Name").inputValue()).toBe("Bilbo Baggins");
 
     // A second file replaces a name that only came from the first.
-    await gm.getByLabel(/Character sheet/).setInputFiles({
-      name: "Frodo Baggins.htm",
-      mimeType: "text/html",
-      buffer: Buffer.from("<h1>Frodo</h1>"),
+    await gm.getByLabel(/Character file/).setInputFiles({
+      name: "Frodo Baggins.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(hdcBytes({ name: "Frodo" }) as Uint8Array<ArrayBuffer>),
     });
     expect(await gm.getByLabel("Name").inputValue()).toBe("Frodo Baggins");
 
     // But not a name the game master typed themselves.
     await gm.getByLabel("Name").fill("Samwise");
-    await gm.getByLabel(/Character sheet/).setInputFiles({
-      name: "Meriadoc.html",
-      mimeType: "text/html",
-      buffer: Buffer.from("<h1>Merry</h1>"),
+    await gm.getByLabel(/Character file/).setInputFiles({
+      name: "Meriadoc.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(hdcBytes({ name: "Merry" }) as Uint8Array<ArrayBuffer>),
     });
     expect(await gm.getByLabel("Name").inputValue()).toBe("Samwise");
 
@@ -1998,10 +1991,10 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
 
     // Replacing the sheet of a character that already has a name leaves it alone.
     await gm.getByRole("button", { name: "Edit Samwise" }).click();
-    await gm.getByLabel(/Character sheet/).setInputFiles({
-      name: "Peregrin.html",
-      mimeType: "text/html",
-      buffer: Buffer.from("<h1>Pippin</h1>"),
+    await gm.getByLabel(/Character file/).setInputFiles({
+      name: "Peregrin.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(hdcBytes({ name: "Pippin" }) as Uint8Array<ArrayBuffer>),
     });
     expect(await gm.getByLabel("Name").inputValue()).toBe("Samwise");
   }, 60_000);
@@ -2039,10 +2032,10 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
 
     await gm.getByRole("button", { name: "Add", exact: true }).click();
     await gm.getByLabel("Name").fill("Gandalf");
-    await gm.getByLabel(/Character sheet/).setInputFiles({
-      name: "sheet.html",
-      mimeType: "text/html",
-      buffer: Buffer.from("<h1>Gandalf</h1>"),
+    await gm.getByLabel(/Character file/).setInputFiles({
+      name: "sheet.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(hdcBytes({ name: "Gandalf" }) as Uint8Array<ArrayBuffer>),
     });
     await gm.getByRole("button", { name: "Add character" }).last().click();
     await gm.getByRole("button", { name: "Gandalf", exact: true }).waitFor();
@@ -2079,16 +2072,14 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
     // A real drop, not `setInputFiles`: the point of the feature is that the
     // dropped file ends up in the input the form submits. The event goes to the
     // input and bubbles to the zone around it, as a drop on the zone would.
-    const zone = gm.getByLabel(/Character sheet/);
-    await zone.evaluate((element) => {
+    const zone = gm.getByLabel(/Character file/);
+    await zone.evaluate((element, bytes: number[]) => {
       const transfer = new DataTransfer();
-      transfer.items.add(
-        new File(["<h1>Dropped</h1>"], "dropped.html", { type: "text/html" }),
-      );
+      transfer.items.add(new File([new Uint8Array(bytes)], "dropped.hdc"));
       element.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: transfer }));
       element.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
-    });
-    await gm.getByText("Ready to upload: dropped.html").waitFor();
+    }, [...hdcBytes({ name: "Dropped" })]);
+    await gm.getByText("Ready to upload: dropped.hdc").waitFor();
 
     await gm.getByRole("button", { name: "Add character" }).last().click();
     await gm.getByRole("button", { name: "Dropped", exact: true }).waitFor();
@@ -2235,12 +2226,15 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
     const frame = player.frameLocator("iframe");
     await frame.getByText("Thorin").waitFor({ timeout: 5000 });
 
-    // The sheet's own script executed inside the frame...
-    const ran = await player
-      .frames()
-      .find((entry) => entry.url().includes("/sheets/"))!
-      .evaluate(() => (window as unknown as { loaded?: boolean }).loaded === true);
-    expect(ran).toBe(true);
+    // The sheet's own script executed inside the frame. The template prints both
+    // editions' rows and hides the one the character is not, which nothing but
+    // its script does — so a hidden row is proof the script ran, and the dice
+    // buttons beside it work for the same reason.
+    const display = await frame
+      .locator(".ed6")
+      .first()
+      .evaluate((element) => getComputedStyle(element).display);
+    expect(display).toBe("none");
 
     // ...but the frame is an opaque origin. Reading cookies from it does not
     // merely come back empty — the browser refuses outright, which is exactly
@@ -2278,10 +2272,10 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
     await page.getByRole("button", { name: `Select ${alpha}` }).click();
     await page.getByRole("button", { name: "Add", exact: true }).click();
     await page.getByLabel("Name").fill("Thorin");
-    await page.getByLabel(/Character sheet/).setInputFiles({
-      name: "thorin.html",
-      mimeType: "text/html",
-      buffer: Buffer.from("<h1>Thorin</h1>"),
+    await page.getByLabel(/Character file/).setInputFiles({
+      name: "thorin.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(hdcBytes({ name: "Thorin" }) as Uint8Array<ArrayBuffer>),
     });
     await page.getByRole("button", { name: "Add character" }).last().click();
     await page.getByRole("button", { name: "Thorin", exact: true }).waitFor();
@@ -2324,18 +2318,16 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
     expect(await page.getByRole("button", { name: "Thorin", exact: true }).count()).toBe(1);
 
     // ...and a file let go there still files a character.
-    await page.evaluate(() => {
+    await page.evaluate((bytes: number[]) => {
       const dataTransfer = new DataTransfer();
-      dataTransfer.items.add(
-        new File(["<h1>Bilbo</h1>"], "Bilbo Baggins.html", { type: "text/html" }),
-      );
+      dataTransfer.items.add(new File([new Uint8Array(bytes)], "Bilbo Baggins.hdc"));
       const panel = [...document.querySelectorAll("section")].find((section) =>
         section.querySelector("h2")?.textContent?.startsWith("Characters in"),
       )!.children[1]!;
       for (const type of ["dragover", "drop"]) {
         panel.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer }));
       }
-    });
+    }, [...hdcBytes({ name: "Bilbo" })]);
     await page.getByRole("button", { name: "Bilbo Baggins", exact: true })
       .waitFor({ timeout: 5000 });
 
@@ -2355,10 +2347,10 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
 
     await page.getByRole("button", { name: "Add", exact: true }).click();
     await page.getByLabel("Name").fill("Thorin");
-    await page.getByLabel(/Character sheet/).setInputFiles({
-      name: "thorin.html",
-      mimeType: "text/html",
-      buffer: Buffer.from("<h1>Thorin</h1>"),
+    await page.getByLabel(/Character file/).setInputFiles({
+      name: "thorin.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(hdcBytes({ name: "Thorin" }) as Uint8Array<ArrayBuffer>),
     });
     await page.getByRole("button", { name: "Add character" }).last().click();
     await page.getByRole("button", { name: "Thorin", exact: true }).waitFor();
@@ -2558,10 +2550,10 @@ describe("the session library can reach past its own campaign", () => {
     await page.getByText(`Characters in ${elsewhere}`).waitFor();
     await page.getByRole("button", { name: "Add", exact: true }).click();
     await page.getByLabel("Name").fill(ogre);
-    await page.getByLabel(/Character sheet/).setInputFiles({
-      name: "ogre.html",
-      mimeType: "text/html",
-      buffer: Buffer.from(`<h1>${ogre}</h1>`),
+    await page.getByLabel(/Character file/).setInputFiles({
+      name: "ogre.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(hdcBytes({ name: ogre }) as Uint8Array<ArrayBuffer>),
     });
     await page.getByRole("button", { name: "Add character" }).last().click();
     await page.getByRole("button", { name: ogre, exact: true }).waitFor();
@@ -2624,26 +2616,96 @@ describe("the session library can reach past its own campaign", () => {
   }, 60_000);
 });
 
-describe("a sheet fills the characteristics in for you", () => {
-  /** A cut-down Ork HERO export with the numbers this test asserts on. */
-  const sheetHtml = (values: { dex: number; spd: number; init?: string }) => [
-    "<!--\n\nGenerated by Ork HERO Templates\n\n-->",
-    '<div id="characteristics-collapse"><table><tbody>',
-    `<tr><td><span class="primary">${values.dex}</span></td><td>DEX</td></tr>`,
-    `<tr><td><span class="primary">${values.spd}</span></td><td>SPD</td></tr>`,
-    "<tr><td>20</td><td>CON</td></tr>",
-    "<tr><td>9</td><td>REC</td></tr>",
-    "<tr><td>33</td><td>END</td></tr>",
-    "<tr><td>27</td><td>STUN</td></tr>",
-    "<tr><td>11</td><td>BODY</td></tr>",
-    "<tr><td>Total Characteristic Points</td><td>85</td></tr>",
-    "</tbody></table></div>",
-    '<div id="talents-collapse"><table><tbody>',
-    `<tr><td>${values.init ?? "Lightning Calculator"}&nbsp;</td></tr>`,
-    "</tbody></table></div>",
-  ].join("\n");
+describe.skipIf(!rulesAvailable)("a real export, filed the way a game master files one", () => {
+  test("splits in the browser, files small, and draws its sheet", async () => {
+    if (!browser) return;
+    const page = await signedInGm();
 
-  test("as the sheet is chosen, and again when it is replaced", async () => {
+    const campaign = unique("Campaign");
+    await page.getByRole("button", { name: "New", exact: true }).click();
+    await page.getByLabel("Campaign name").fill(campaign);
+    await page.getByRole("button", { name: "Create campaign" }).click();
+    await page.getByText(`Characters in ${campaign}`).waitFor();
+
+    // What actually crosses the wire, measured rather than assumed: the file on
+    // disk is 3.7 MB, of which all but about 92 KB is the portrait.
+    const uploaded: number[] = [];
+    page.on("request", (request) => {
+      if (request.method() === "POST" && request.url().includes("/api/characters")) {
+        uploaded.push(Number(request.headers()["content-length"] ?? 0));
+      }
+    });
+
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    await page.getByLabel(/Character file/).setInputFiles("./fixtures/Redshift.hdc");
+
+    // The characteristics come back from the server, worked out against the
+    // rules — these are the numbers on the sheet HERO Designer exports.
+    await page.waitForFunction(
+      () => (document.querySelector('input[name="dexterity"]') as HTMLInputElement)?.value === "26",
+      undefined,
+      { timeout: 10_000 },
+    );
+    const box = (label: string) => page.getByLabel(label, { exact: true });
+    expect(await box("SPD").inputValue()).toBe("5");
+    expect(await box("STUN").inputValue()).toBe("35");
+    expect(await box("INIT").inputValue()).toBe("4");
+    // Named after the file, as any other upload is.
+    expect(await page.getByLabel("Name").inputValue()).toBe("Redshift");
+
+    const name = unique("Redshift");
+    await page.getByLabel("Name").fill(name);
+    await page.getByRole("button", { name: "Add character" }).last().click();
+    await page.getByRole("button", { name, exact: true }).waitFor();
+
+    // Both requests carried the split file, not the 3.7 MB original: the
+    // characteristics preview, and the upload that filed the character with its
+    // portrait already sized for a card.
+    expect(uploaded.length).toBe(2);
+    for (const bytes of uploaded) expect(bytes).toBeLessThan(1_000_000);
+
+    // The portrait inside the file became the card. The picture is decorative
+    // markup — the name is right beside it — so it is found by what it points
+    // at, and this campaign has no other picture in it.
+    await page.locator('img[src^="/uploads/images/"]').first().waitFor({ timeout: 5000 });
+
+    // And the sheet is drawn from the stored file, on demand.
+    await page.getByRole("button", { name: `View ${name}'s sheet` }).click();
+    const sheet = page.frameLocator("iframe");
+    await sheet.locator("text=Redshift").first().waitFor({ timeout: 10_000 });
+
+    await page.close();
+  }, 90_000);
+});
+
+describe.skipIf(!rulesAvailable)("a character file fills the characteristics in for you", () => {
+  /**
+   * A character file with the levels behind the numbers this test asserts on.
+   *
+   * A file stores levels *bought*; what a sheet prints is those plus the game
+   * system's base, some of it figured from other characteristics — SPD's base is
+   * one plus a tenth of DEX. So `{ DEX: 13, SPD: 2 }` is a DEX of 23 and a SPD
+   * of 5, and the two cannot be read apart.
+   */
+  const characterFile = (values: {
+    dex: number;
+    spd: number;
+    reflexes?: number;
+  }) =>
+    hdcBytes({
+      characteristics: {
+        DEX: values.dex,
+        CON: 10,
+        BODY: 1,
+        SPD: values.spd,
+        REC: 5,
+        END: 13,
+        STUN: 7,
+      },
+      ...(values.reflexes === undefined ? {} : { lightningReflexes: values.reflexes }),
+    });
+
+  test("as the file is chosen, and again when it is replaced", async () => {
     if (!browser) return;
     const page = await signedInGm();
 
@@ -2656,29 +2718,28 @@ describe("a sheet fills the characteristics in for you", () => {
     const box = (label: string) => page.getByLabel(label, { exact: true });
 
     await page.getByRole("button", { name: "Add", exact: true }).click();
-    // Typed first, so the sheet is seen to write over it rather than into a gap.
+    // Typed first, so the file is seen to write over it rather than into a gap.
     await box("DEX").fill("7");
-    await page.getByLabel(/Character sheet/).setInputFiles({
-      name: "hero.html",
-      mimeType: "text/html",
-      buffer: Buffer.from(sheetHtml({
-        dex: 23,
-        spd: 4,
-        init: "Lightning Reflexes: +4 DEX to act first with All Actions",
-      })),
+    await page.getByLabel(/Character file/).setInputFiles({
+      name: "hero.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(
+        characterFile({ dex: 13, spd: 2, reflexes: 4 }) as Uint8Array<ArrayBuffer>,
+      ),
     });
 
-    // Reading the file is asynchronous, so the box is waited for rather than read.
+    // Splitting the file and asking the server about it are both asynchronous,
+    // so the box is waited for rather than read.
     await page.waitForFunction(
       () => (document.querySelector('input[name="dexterity"]') as HTMLInputElement)?.value === "23",
       undefined,
       { timeout: 5000 },
     );
-    expect(await box("SPD").inputValue()).toBe("4");
+    expect(await box("SPD").inputValue()).toBe("5");
     expect(await box("CON").inputValue()).toBe("20");
-    expect(await box("REC").inputValue()).toBe("9");
-    expect(await box("END").inputValue()).toBe("33");
-    expect(await box("STUN").inputValue()).toBe("27");
+    expect(await box("REC").inputValue()).toBe("11");
+    expect(await box("END").inputValue()).toBe("53");
+    expect(await box("STUN").inputValue()).toBe("33");
     expect(await box("BODY").inputValue()).toBe("11");
     expect(await box("INIT").inputValue()).toBe("4");
 
@@ -2687,15 +2748,15 @@ describe("a sheet fills the characteristics in for you", () => {
     await page.getByRole("button", { name: "Add character" }).last().click();
     await page.getByRole("button", { name, exact: true }).waitFor();
 
-    // A replacement sheet overwrites what the character already carries: choosing
-    // a sheet is choosing what this character is.
+    // A replacement file overwrites what the character already carries: choosing
+    // a file is choosing what this character is.
     await page.getByRole("button", { name: `Edit ${name}` }).click();
     expect(await box("DEX").inputValue()).toBe("23");
 
-    await page.getByLabel(/Character sheet/).setInputFiles({
-      name: "hero-v2.html",
-      mimeType: "text/html",
-      buffer: Buffer.from(sheetHtml({ dex: 18, spd: 6 })),
+    await page.getByLabel(/Character file/).setInputFiles({
+      name: "hero-v2.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(characterFile({ dex: 8, spd: 4 }) as Uint8Array<ArrayBuffer>),
     });
 
     await page.waitForFunction(

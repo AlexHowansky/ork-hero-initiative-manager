@@ -56,6 +56,16 @@ export const errors = {
   tooLarge: (message: string) => new AppError("payload_too_large", message),
   rateLimited: (message = "Too many attempts. Please wait a moment and try again.") =>
     new AppError("rate_limited", message),
+  /**
+   * A failure on our side that a person can still do something about.
+   *
+   * Anything else that escapes a handler becomes `GENERIC_ERROR_MESSAGE`, which
+   * is right for a failure the reader cannot act on. This is for the ones they
+   * can — a character whose sheet will not build is fixed by re-exporting it,
+   * and saying so beats "something went wrong on our end".
+   */
+  internal: (message: string, context?: Record<string, unknown>) =>
+    new AppError("internal", message, context),
 };
 
 export const GENERIC_ERROR_MESSAGE =

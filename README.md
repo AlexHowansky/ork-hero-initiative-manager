@@ -16,10 +16,23 @@ database file, no external services.
 
 ```bash
 bun install
-cp .env.example .env          # then edit it
+bunx extract-rules /path/to/HD6.jar   # the HERO game rules; see below
+cp .env.example .env                  # then edit it
 bun run cli gm:add --email you@example.com
-bun run dev                   # http://localhost:3000
+bun run dev                           # http://localhost:3000
 ```
+
+**The rules data has to be extracted once, from your own copy of HERO
+Designer.** A `.hdc` character file records structure rather than presentation —
+a skill is `XMLID="ACTING" LEVELS="1"`, and what it costs and how it prints is
+computed against the game system's data. That data is Hero Games' copyrighted
+material, so it ships with neither this app nor the renderer it uses.
+`extract-rules` writes it where the app looks by default; `HERO_RULES_DIR` moves
+it elsewhere. Without it no character sheet can be drawn and no characteristic
+can be read from an upload, and the server says so at startup.
+
+`ork-hero-export-renderer` is not on npm yet, so `package.json` points at a local
+tarball; that becomes an ordinary `^0.1.0` once it is published.
 
 Accounts are deliberately not manageable from the web UI — see the CLI below.
 
@@ -776,7 +789,7 @@ That line now scrolls sideways within the panel, which is what the spec asked fo
 anyway: pushed sideways to read the end of, rather than folded in half.
 
 **File fields take a drop, and still are file fields.** Adding a character means
-handing over an HTML sheet and often a picture, and dragging a file from a folder
+handing over a `.hdc` character file and often a picture, and dragging a file from a folder
 is the shorter path — so both fields on the character form are `FileDrop`
 (`src/client/components/ui.tsx`), a dashed zone that names the file once it has
 one. The native `<input type="file">` stays inside it rather than being replaced
@@ -790,8 +803,8 @@ have produced. The sheet field leads the form, ahead of the name: handing the
 file over is what the dialog is for, and everything under it — name, type,
 campaign, picture — is filing the thing that was just uploaded.
 
-That ordering is also what makes the name fill itself in. A sheet is nearly
-always saved under the character's name, so uploading `Bilbo Baggins.html` puts
+That ordering is also what makes the name fill itself in. A character file is nearly
+always saved under the character's name, so uploading `Bilbo Baggins.hdc` puts
 "Bilbo Baggins" in the field below it — the extension goes, and nothing else
 about the filename is second-guessed. It writes only into an empty field or over
 a name the last upload put there, tracked in a ref: a second file replaces its
@@ -799,16 +812,16 @@ own suggestion, but never a name the game master typed, and never the name of a
 character being edited.
 
 The panel behind the dialog is a drop target too, and it does not open the
-dialog at all: sheets dropped anywhere on "Characters in …" are filed as
-characters there and then. Everything the dialog would have asked for is already
+dialog at all: character files dropped anywhere on "Characters in …" are filed
+as characters there and then. Everything the dialog would have asked for is already
 known by the time the drop lands — the panel only exists while a campaign is
 selected, the filename names the character exactly as the dialog's own field
 would, and a dropped character is an NPC until someone edits it — so the dialog
-would have been a form with nothing left to fill in. A whole folder of sheets is
-therefore filed by dropping the folder: `fileSheets` (`GmLibrary.tsx`) posts one
-sheet at a time, since the server takes a portrait out of each and a dozen of
-those at once is a dozen image decodes racing each other for no gain. Each card
-appears as its sheet lands — inserted in name order, which is the order the
+would have been a form with nothing left to fill in. A whole folder of characters
+is therefore filed by dropping the folder: `fileSheets` (`GmLibrary.tsx`) splits
+each file and posts one at a time, since each one is taken apart and its picture
+re-encoded, and a dozen of those at once is a dozen image decodes racing each
+other for no gain. Each card appears as its file lands — inserted in name order, which is the order the
 library arrives in — under a line saying how many are still to come, and one
 failure is reported without stopping the rest.
 
@@ -834,9 +847,9 @@ on the same DEX+INIT stand where the game master expects.
 
 **A name the campaign already has is that character being updated**, not a
 collision. Re-exporting from HERO Designer and dropping the file back is how a
-sheet is kept current, and refusing it left the game master finding each
+character is kept current, and refusing it left the game master finding each
 character, opening its dialog and picking the file by hand. So the drop replaces
-the stored sheet, the characteristics inside the file replace the character's, and
+the stored file, the characteristics inside it replace the character's, and
 the portrait inside it replaces the picture — the dropped file is the whole of the
 intent, and there is nothing in the gesture that could mean "but keep the old
 picture". The kind is what it leaves alone: a monster dropped over a hero does not
@@ -873,7 +886,7 @@ entirely alone: not `preventDefault`ed, so it passes through to whatever is behi
 and the browser draws a no-drop cursor rather than an invitation the element cannot
 honour. That one guard is what lets card drags and file drags share a page: before
 it, the character panel claimed every drag that crossed it, so a character dragged
-back onto its own panel was filed as though a sheet had arrived. The
+back onto its own panel was filed as though a character file had arrived. The
 window-level swallow is narrowed the same way, for the same reason.
 
 **Dragging a character onto a campaign refiles it.** Both libraries are on screen
@@ -901,76 +914,121 @@ running cannot be moved at all: refiling it would leave it in the running sessio
 a campaign it no longer belongs to, which is not something the players could make
 sense of, so the drop is refused and says to end the session first.
 
-**A sheet often knows its own characteristics.** The exports this table uses come
-from [Ork HERO Templates](https://github.com/AlexHowansky/ork-hero-templates),
-which stamps a marker comment at the top of every file it writes and lays the
-characteristics out in a table with a known id. So SPD, DEX, CON, REC, END, STUN
-and BODY are read off the file rather than typed in beside it, and INIT comes
-from the Lightning Reflexes in the talents table — a talent rather than a characteristic,
-which is why it is looked up separately.
+**A character file knows its own characteristics.** A character is filed by
+uploading the `.hdc` HERO Designer saved, and everything the app shows is worked
+out from it. That file records *structure*, not presentation — a skill is
+`XMLID="ACTING" LEVELS="1" BASECOST="3.0"`, and a characteristic is the levels
+bought rather than the number a sheet prints — so reading it means computing
+against the game system's rules, which is what
+[ork-hero-export-renderer](https://github.com/AlexHowansky/ork-hero-export-renderer)
+does.
 
-`statsFromSheetHtml` (`src/lib/sheet-stats.ts`) is the whole of it, in `lib/`
-because both sides call it: the browser reads the file as it is chosen so the
-dialog's boxes fill in, and the server reads the stored sheet for the characters
-filed by dropping a folder of them, which send no boxes at all. One parser, so the
-two cannot disagree about what a sheet says. The server puts the form first —
-whatever the dialog sent wins, since the browser has already read the sheet and
-the game master saw the numbers — and bounds anything it reads by the same
-`schemas.heroStat` a typed number passes through, dropping what will not fit
-rather than refusing the upload over a characteristic this table may never use.
+`src/server/hero-sheet.ts` is the whole of this app's contact with that library.
+SPD, DEX, CON, REC, END, STUN and BODY are the characteristics' totals rather
+than their values, so a power or a talent that raises one is counted; INIT is not
+a characteristic at all but the Lightning Reflexes talent, matched on
+`LIGHTNING_REFLEXES_ALL` — the rules data gives a bonus bought for one kind of
+action its own id, and a bonus that applies only to ranged attacks is not an
+initiative bonus a fight can be ordered by. A character without the talent reads
+INIT 0, because in HERO that is an answer rather than a gap.
 
-Five things in the real files decide how the table is read, and the tests in
-`tests/sheet-stats.test.ts` are named after them. The **marker is the licence**:
-without it, ids like `characteristics-collapse` are words that might mean this or
-might mean anything, and a wrong reading writes silently onto a character — so an
-unmarked sheet is left completely alone. The **last row is written back to front**
-(`Total Characteristic Points | 85`), which read by position alone invents a
-characteristic called `85`; requiring the second cell to name a characteristic
-*and* the first to be a whole number throws it out, along with the header row and
-every value HERO writes as a fraction or a distance. **Some values are written as
-a pair** — `6 / 16` is the characteristic and what it comes to with something else
-switched on — and a cell is read up to the first slash, so the characteristic
-itself is what gets stored. **SPD and BODY are printed twice** and the first
-printing wins. And **`Lightning Calculator` is a
-different talent** that shares a first word with the one that matters, so the
-whole phrase is matched, including the `All Actions` that separates a general
-initiative bonus from one bought for ranged attacks alone. A marked sheet with no
-Lightning Reflexes reads INIT 0, because in HERO that is an answer rather than a
-gap.
+It is server-side because the rules are megabytes of JSON on disk. So the dialog
+asks: choosing a file splits it in the browser and posts the character half to
+`POST /api/characters/stats`, which parses it, answers with the numbers, and
+stores nothing. One implementation of "what does this file say", so the dialog
+and the folder-drop path — which sends no boxes at all and is read from the
+stored file — cannot disagree. The server puts the form first, since whatever the
+dialog sent is what the game master saw and could have corrected, and bounds
+anything it reads by the same `schemas.heroStat` a typed number passes through,
+dropping what will not fit rather than refusing an upload over a characteristic
+this table may never use.
 
-Choosing a sheet **overwrites** what is in the boxes, including on a character
-being edited: choosing a sheet is choosing what the character is, and that is what
-uploading a replacement is for. It happens silently — the numbers appearing is the
-message — and they are still the game master's to correct before saving.
+Choosing a file **overwrites** what is in the boxes, including on a character
+being edited: choosing a file is choosing what the character is, and that is what
+uploading a replacement is for. It happens silently — the numbers appearing is
+the message — and they are still the game master's to correct before saving.
 
-**A sheet usually contains the portrait already.** Sheets are self-contained
-files, so the character's picture is already inside the HTML — and asking the
+**The rules data is not shipped, by anyone.** It is derived from Hero Games'
+`*.hdt` files and is their copyrighted material, so neither this app nor the
+renderer distributes it. An operator extracts it from their own copy of HERO
+Designer with `bunx extract-rules /path/to/HD6.jar`, which writes it where the
+app looks by default; `HERO_RULES_DIR` moves it elsewhere. Without it no sheet
+can be drawn and no characteristic can be read, so the server says so at startup
+rather than leaving it to be discovered mid-session — and the tests that need it
+skip rather than fail, since it cannot be in CI either.
+
+**The sheet is rendered, not stored.** What a game master or a player opens is
+built from the character file on request, by applying this table's export
+template — `assets/Ork-16x9.hde`, from
+[Ork HERO Templates](https://github.com/AlexHowansky/ork-hero-templates) — to the
+stored `.hdc`. Nothing caches the result. Re-export a character, drop the file
+back, and the next person to open it sees the new sheet, with nothing to
+invalidate: the file *is* the character, and the sheet is what that character
+looks like through today's template and today's rules.
+
+It costs about 30ms once the rules and the template are read, which they are once
+per process rather than once per request. What is never held is the HTML they
+produce. Rendering runs with the library's strict mode **off**: in strict mode
+anything the renderer cannot work out stops the render with an explanation, which
+is right for a command line and wrong for a game master who has just clicked a
+character's name mid-fight — a blank where one line should be is recoverable, and
+a blank page is not.
+
+A character filed before the app read `.hdc` files has an HTML sheet stored
+against it and there is nothing to render one from. That says so in those words,
+naming the file the game master already has, rather than 404ing as though the
+character were somebody else's.
+
+**A character file contains the portrait already.** HERO Designer keeps the
+character's picture inside the file, as base64 in a CDATA section, so asking the
 game master to find and upload the same image a second time is work the app can
-do itself. `portraitFromSheet` (`src/server/uploads.ts`) reads the stored sheet,
-decodes what is embedded in it and keeps the largest image, which is stored as an
-ordinary image upload and becomes the character's picture.
+do itself. It becomes the character's card, and is taken back out of the stored
+file rather than kept twice — the picture is nearly the whole of what one of
+these files weighs. The fixture is 3.7 MB, of which all but 92 KB is a 1.3 MB
+PNG: base64 in UTF-16 costs about three bytes for every one of the picture's.
 
-It looks for encoded bytes rather than for markup, because there is no agreeing
-on the markup: the same picture turns up in an `img` tag, in a CSS `url()`, and
-in a string a script assigns to `.src` at load time — that last one with no
-`data:` prefix anywhere in the file, just a long hex or base64 literal in a
-variable. So both encodings are scanned wherever they appear, and what identifies
-an image is what identifies every other upload: the bytes it starts with. Only
-the first few bytes of a candidate are decoded to decide that, since a sheet is
-full of long runs that are really a hash, a minified bundle, or an embedded font;
-megabytes are decoded only once the run is known to be an image. There is no
-convention for *which* image is the portrait either, but a portrait is reliably
-bigger than the dice icons and rules diagrams around it; anything under 2 KB is
-skipped as furniture.
+There is exactly one place to look and one picture to find, which is the whole of
+the difference from the HTML sheets this replaced. Those had to be *scanned* for
+long runs of base64 or hex that decoded to something with image magic bytes, with
+the largest one assumed to be the portrait, because no markup convention said
+which image was which — the same picture turns up in an `img` tag, in a CSS
+`url()`, and in a string a script assigns to `.src` at load time. What has not
+changed is that only what is **embedded** counts: following a URL an uploaded
+file names would let that file steer a request from the server, at whatever
+address it likes, which is the whole of SSRF.
 
-Two rules hold it in place. **Images linked by URL are never fetched.** Following
-a `src` an uploaded file names would let that file steer a request from the
-server, at whatever address it likes — the whole of SSRF — so only what is
-embedded in the sheet is considered. And **a picture the game master chose is
-never overruled**: an image uploaded in the same request wins, a new sheet fills
-an empty picture but never replaces an existing one, and a failed scan is logged
-and forgotten rather than failing the upload, since a portrait nobody asked for
-is not worth an error.
+Nor has the other rule. **A picture the game master chose is never overruled**:
+an image uploaded in the same request wins, a new file fills an empty picture but
+never replaces an existing one, and a failure is logged and forgotten rather than
+failing the upload, since a portrait nobody asked for is not worth an error.
+
+**The browser takes the file apart before uploading it.** `src/client/hdc.ts`
+decodes the `.hdc`, lifts the picture out, scales it to the size a card shows it
+at and encodes it as WebP, and sends the character and the picture as two parts —
+a 3.7 MB upload becomes tens of kilobytes, twice over, since the dialog also
+sends the file to be read for its characteristics. It also means a character
+whose embedded portrait would push the file past `UPLOAD_LIMIT_BYTES` can be
+filed at all.
+
+None of it is load-bearing. Every step falls back to handing the file over as it
+arrived, because the server does all of this anyway for a file that reaches it
+whole — through the API, or from a browser without an `OffscreenCanvas` that will
+encode WebP. The server is still the authority on what a character's picture is.
+
+Two details are easy to get wrong quietly, and both are why this code is not a
+line of `TextDecoder`. These files are UTF-16 **big** endian with a byte-order
+mark while the declaration inside says only `encoding="UTF-16"`, so the mark is
+the authority and the declaration is not; and the picture sits in a CDATA
+section, whose markers fed to a base64 decoder are an error rather than a few
+stray bytes — a character with no card, indistinguishable from one that never had
+a picture. `tests/client-hdc.test.ts` is named after both.
+
+The picture arrives as its own form field, `sheetPortrait`, rather than as
+`card`. `card` means *the game master picked this*, which outranks the remove
+checkbox and outranks the file's own portrait; an auto-extracted picture arriving
+under that name would silently replace a chosen card every time a new export was
+uploaded. Under its own name it means what it is, and every precedence rule above
+holds unchanged.
 
 **The campaign being worked on is lit rather than merely outlined.** The card of
 the selected campaign — the one whose characters fill the panel beside it — wears
@@ -1005,14 +1063,14 @@ the card is right there, and what it should look like is the whole of the
 decision. The invitation is drawn *inside the well*, over the picture, rather
 than as a ring around the card: a campaign card already wears a ring for a
 character being refiled onto it, and a second would read as that one. The well says what a drop would actually replace. A card
-also sits inside the panel that files a dropped sheet as a new character, so
+also sits inside the panel that files a dropped character file as a new character, so
 `useDropTarget` stops a drop it has claimed from travelling any further — the
 innermost target that wants a file is the one that gets it, and one drop never
 means two things.
 
 **And so can a character's kind, with a key.** `P` and `N` over a card in the
 library make it a player character or a non-player character — the same one-field
-`PATCH` the picture drop sends. It exists because a sheet arrives as an NPC (the
+`PATCH` the picture drop sends. It exists because a dropped file arrives as an NPC (the
 safer default), so filing a party of six meant six trips through the edit dialog
 to say what anyone could see by looking at the card.
 
@@ -1044,7 +1102,7 @@ keyboard's focus as well as the pointer, since a game master driving the page by
 keyboard has no pointer and the card they are on is the card they mean.
 
 Emptying the picture deliberately is what `Remove the current card image` is for — on both edit dialogs, and offered only when there is
-one to remove. It outranks a portrait found in a sheet uploaded alongside it, and
+one to remove. It outranks a portrait from a character file uploaded alongside it, and
 loses to a picture chosen in the same submission, so neither box nor file has to
 be undone by the other.
 
@@ -1108,7 +1166,7 @@ is the size that was asked for rather than two pixels short of it — the one pl
 those two variables meet, and the reason the border width is a variable at all.
 
 **Pictures are stored at the size they are looked at.** Every image the app shows
-— a campaign's, a character's, and the portrait lifted out of a sheet — ends up
+— a campaign's, a character's, and the portrait lifted out of a character file — ends up
 in a square card, so keeping the 4000px photograph that was uploaded costs a game
 master's phone several megabytes to draw a thumbnail. `fitToCard`
 (`src/server/uploads.ts`, on the path every image upload takes) scales the
@@ -1123,6 +1181,14 @@ and the rest of the picture is still in the file for anywhere it is shown
 differently. Nothing is enlarged either, and one whose bytes sharp cannot read is
 stored exactly as it arrived, since it passed the magic-byte check and a game
 master would rather have their picture at full size than an error.
+
+The browser does the same arithmetic before uploading a character file
+(`src/client/hdc.ts`): the picture inside it is scaled to that same
+`limits.storedImagePx` and encoded as WebP, so the upload is tens of kilobytes
+rather than megabytes. `fitToCard` still runs on what arrives and is unchanged by
+it — an already-small picture passes its "nothing is enlarged" check and is
+returned as it came, which is what keeps the server correct for images arriving
+from anywhere else without a branch for who sent them.
 
 **And in the format that holds them in the fewest bytes**, which is rarely the
 one they arrived in: a photograph saved as PNG is lossless data about a lossy
@@ -1375,43 +1441,49 @@ rather than once for the whole turn.
 
 ## Character sheets
 
-Sheets are uploaded HTML and keep their JavaScript, so a sheet with dice buttons
-or auto-calculating fields keeps working. They are therefore treated as
-untrusted code.
+A sheet is not uploaded and not stored. What is stored is the `.hdc` HERO
+Designer saved; the sheet is built from it on every request, by applying this
+table's export template (`assets/Ork-16x9.hde`) to the file. Nothing caches the
+result, so re-exporting a character and dropping the file back is the whole of
+keeping their sheet current.
 
-A sheet is stored as it was written, with one exception: when a portrait is
-lifted out of a sheet and becomes the character's card, that picture's own bytes
-are taken back out of the HTML (`removeRun`, `src/server/uploads.ts`). Keeping
-both is keeping the same image twice, and the copy inside the sheet is the larger
-one — a card is fitted on the way in, while a sheet carries whatever was pasted
-into it. It is also nearly all of what a sheet weighs: one library's sheets ran to
-18 MB, almost entirely embedded portraits, and one 985 KB sheet came out at 52 KB.
+The stored file is kept as it arrived, with one exception: when the picture
+inside it becomes the character's card, that picture is taken back out
+(`removeImage`, `src/server/uploads.ts`). Keeping both is keeping the same image
+twice, and the copy inside the file is much the larger one — a card is fitted on
+the way in, while the file carries whatever HERO Designer was given, as base64 in
+UTF-16 at about three bytes for every one of the picture's. It is also nearly all
+of what one of these files weighs: the fixture is 3.7 MB, and 92 KB of that is
+the character. The rendered sheet therefore has no portrait on it, which is the
+trade: the picture lives on the card, which is where this app shows it. A file
+that cannot be rewritten is left alone and keeps its picture; the card still
+stands either way.
 
-Only the run that was decoded goes, and nothing is written in its place. The
-markup around it is never parsed — that is what lets the same code find a picture
-in an `img` tag, a CSS `url()` and a script variable alike — so what is left is
-an empty `data:` URI in the first case and an empty string literal in the last.
-A sheet that drew its own portrait therefore stops drawing one, which is the
-trade: the picture lives on the card, which is where the app shows it, and the
-sheet goes back to being a sheet rather than a second copy of the image. A sheet
-that cannot be rewritten is left alone and keeps its embedded picture; the card
-still stands either way.
+**The sheet is still not this app's markup to trust.** It is output this app
+generated, but a character's own fields carry whatever CSS and web fonts the game
+master wrote into HERO Designer — the fixture puts a Google Fonts `@import` and a
+`.character-name` rule in its Campaign Use box — and the export template is a
+document in its own right. So it is served exactly as the uploaded HTML sheets
+were: with a `sandbox` Content-Security-Policy, embedded in an iframe that
+repeats it as an attribute, deliberately *without* `allow-same-origin`. That
+gives the document an opaque origin — its scripts run, but it cannot read the
+app's cookies or storage, reach into the surrounding page, or call the API as the
+signed-in user. A sheet that tries gets a `SecurityError` for `document.cookie`
+and a CORS rejection from `origin: null` for any fetch; both are asserted in
+`tests/e2e.test.ts`. `Cache-Control: private, no-store` is doubly true now: there
+is no stored artifact to go stale.
 
-**Nothing else is rewritten, and nothing is stripped.** No script is removed, no
-style is touched. The isolation happens on delivery:
-each sheet is served with a `sandbox` Content-Security-Policy and embedded in an
-iframe that repeats it as an attribute, deliberately *without*
-`allow-same-origin`. That gives the document an opaque origin — its scripts run,
-but it cannot read the app's cookies or storage, reach into the surrounding page,
-or call the API as the signed-in user. A sheet that tries gets a `SecurityError`
-for `document.cookie` and a CORS rejection from `origin: null` for any fetch;
-both are asserted in `tests/e2e.test.ts`.
+A sheet that will not build answers **500**, not 404. Everything above it in that
+route is a 404 on purpose — "this is not yours to see", said identically whether
+or not the character exists, so ids cannot be probed — and a character that is
+yours and would not render is a different problem. A game master told the wrong
+one of those goes looking for the wrong thing.
 
-**A sheet is shown as it was written.** Whichever of the three places it is opened
-from — the library preview, the session console, the player's `My sheet` — it goes
+**A sheet is shown as its template wrote it.** Whichever of the three places it is
+opened from — the library preview, the session console, the player's `My sheet` — it goes
 through one `SheetOverlay` (`components/SheetFrame.tsx`), and there is nothing of
 ours around it: no title bar, no border, no rounding, no padding. A sheet is a
-whole page of somebody else's design, and a strip of our own chrome would both take
+whole page laid out by a template of its own, and a strip of our own chrome would both take
 the room and change the shape it is laid out in. The one thing over it is the close
 control, in the *window's* top right rather than the sheet's, so it stays in the
 same place whatever size the sheet is drawn at. It is an `IconButton`, the same
@@ -1446,6 +1518,7 @@ The app expects a TLS-terminating reverse proxy in front of it.
 
 ```bash
 bun install --production
+bunx extract-rules /path/to/HD6.jar   # once, and again after a HERO Designer update
 bun run cli db:migrate
 NODE_ENV=production bun run start
 ```
@@ -1536,10 +1609,11 @@ Back up `data/` — it holds both the database and every uploaded file.
   so nobody guesses one; the rule is what stops an id that gets out — a
   screenshot, a browser history, a proxy log — from being readable by every
   account on the instance.
-- **Character sheets** carry the game master's own JavaScript, so they are served
-  under a `sandbox` CSP with no `allow-same-origin`. That puts them in an opaque
-  origin: the script still runs, but it cannot reach this app's cookies, storage,
-  DOM or authenticated API.
+- **Character sheets** are rendered from the stored character file rather than
+  uploaded, but they still carry whatever CSS and web fonts the game master wrote
+  into the character, so they are served under a `sandbox` CSP with no
+  `allow-same-origin`. That puts them in an opaque origin: script still runs, but
+  it cannot reach this app's cookies, storage, DOM or authenticated API.
 - **The page itself** is served by the app in production, so it carries
   `X-Frame-Options: DENY` and the rest of the response headers rather than
   depending on a proxy to add them. See Deployment for what development does
@@ -1562,6 +1636,12 @@ segment filter narrowing one reader's list without touching anyone else's, dragg
 a character card onto another campaign, player screens updating without a refresh,
 a sheet opening in the window's own shape, and the sheet sandbox holding. They need Playwright's
 Chromium (`bunx playwright install chromium`) and are skipped without it.
+
+Anything that computes a characteristic or renders a sheet needs the HERO rules
+data, which is not in this repository and cannot be in CI. Those tests skip
+without it rather than failing — `rulesAvailable` in `tests/helpers.ts` is the
+gate — so a run with `HERO_RULES_DIR` set covers more than one without. The
+tests that only read and store a character file run either way.
 
 In development you may see a console warning that an inline script was blocked
 by the page CSP. That is Bun's hot-reload injection; the production build

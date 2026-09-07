@@ -28,6 +28,7 @@
     "@fortawesome/react-fontawesome": "^3.5.0",
     "bun-plugin-tailwind": "^0.0.15",
     "daisyui": "^5.7.28",
+    "ork-hero-export-renderer": "/tmp/ork-hero-export-renderer-0.1.0.tgz",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router": "^7.18.3",

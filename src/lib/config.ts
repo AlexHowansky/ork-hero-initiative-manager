@@ -5,6 +5,7 @@
  * other module reads `process.env` directly.
  */
 
+import { defaultRulesDirectory } from "ork-hero-export-renderer";
 import { CARD_IMAGE_PX } from "./cards.ts";
 
 function bool(value: string | undefined, fallback = false): boolean {
@@ -128,6 +129,22 @@ export const config = {
   trustedProxy: bool(process.env.TRUSTED_PROXY),
   databasePath: process.env.DATABASE_PATH ?? "./data/app.db",
   uploadDir: process.env.UPLOAD_DIR ?? "./data/uploads",
+  /**
+   * The compiled HERO rules a character sheet is rendered against.
+   *
+   * A `.hdc` file records structure, not presentation — a skill is
+   * `XMLID="ACTING" LEVELS="1"`, and what it costs and how it prints is computed
+   * against the game system's own data. That data is Hero Games' copyrighted
+   * material and so is not distributed with the renderer or with this app: an
+   * operator extracts it from their own copy of HERO Designer with
+   * `bunx extract-rules /path/to/HD6.jar`, which by default writes it where the
+   * fallback below looks.
+   *
+   * Without it no sheet can be rendered and no characteristic can be read off an
+   * upload, so `server/index.ts` says so at startup rather than leaving it to be
+   * discovered mid-session.
+   */
+  heroRulesDir: process.env.HERO_RULES_DIR ?? defaultRulesDirectory(),
   logLevel: logLevel(process.env.LOG_LEVEL),
   /** Development escape hatch: serve cookies without the Secure flag over plain HTTP. */
   insecureCookies: bool(process.env.INSECURE_COOKIES),

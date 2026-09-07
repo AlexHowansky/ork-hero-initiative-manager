@@ -1,8 +1,9 @@
 /**
  * Character library. Game master only.
  *
- * A character is a name plus an uploaded HTML sheet, filed under exactly one
- * campaign. The sheet itself is delivered by routes/files.ts.
+ * A character is a name plus an uploaded HERO Designer character file (`.hdc`),
+ * filed under exactly one campaign. The sheet a game master looks at is rendered
+ * from that file on demand by routes/files.ts; nothing stores it.
  */
 
 import type { BunRequest } from "bun";
@@ -16,11 +17,13 @@ import {
   collectOrphanedUploads,
   fileField,
   portraitFromSheet,
+  readUploadedFile,
   requireTotalWithinLimit,
   statsFromSheet,
   storeImage,
   storeSheet,
 } from "../uploads.ts";
+import { statsFromHdc } from "../hero-sheet.ts";
 import type { CharacterRow, GmRow, UploadRow } from "../../db/types.ts";
 import { presentCharacter } from "../presenters.ts";
 import { sessionIdsWith } from "../session-state.ts";
@@ -45,20 +48,31 @@ function requireOwnedCampaignId(gm: GmRow, campaignId: string): void {
 }
 
 /**
- * The portrait embedded in a freshly uploaded sheet, if there is one.
+ * The portrait that came with a freshly uploaded character file, if there is
+ * one.
  *
- * A picture the game master did not ask for is a convenience, never a reason to
- * fail: anything that goes wrong scanning the sheet leaves the character without
- * one, which is exactly where it would have been anyway.
+ * Two ways it arrives, and they mean the same thing. Ordinarily the browser has
+ * already taken the picture out of the file and sized it (`client/hdc.ts`), so
+ * it comes as its own part and this simply stores it. Otherwise the file reached
+ * the server whole — through the API, or from a browser where the split failed —
+ * and the picture is still inside it.
+ *
+ * Either way it is a picture the game master did not ask for, so it is a
+ * convenience and never a reason to fail: anything that goes wrong leaves the
+ * character without one, which is exactly where it would have been anyway.
  */
 async function portraitOrNone(
   sheet: UploadRow,
+  sent: File | null,
   logger: RequestContext["logger"],
 ): Promise<UploadRow | null> {
   try {
-    return await portraitFromSheet(sheet);
+    return sent ? await storeImage(sent) : await portraitFromSheet(sheet);
   } catch (error) {
-    logger.warn("could not take a portrait from the sheet", { uploadId: sheet.id, error });
+    logger.warn("could not take a portrait from the character file", {
+      uploadId: sheet.id,
+      error,
+    });
     return null;
   }
 }
@@ -82,15 +96,15 @@ function statsFromForm(form: FormData): Partial<Record<HeroStatField, number>> {
 }
 
 /**
- * The characteristics from a sheet that this app could actually store.
+ * The characteristics from a character file that this app could actually store.
  *
  * A typed number is bounded by `schemas.heroStat` on the way in — SPD runs 0 to
- * 12 — and a number read off a sheet has to clear the same bar, or an odd export
- * would put a character on the stage that no form could have produced.
+ * 12 — and a number computed from a file has to clear the same bar, or an odd
+ * export would put a character on the stage that no form could have produced.
  *
  * What it does with a number that fails is where it parts company with the form:
  * a game master who types 40 into the SPD box is told so and can fix it, but
- * nobody typed this one. Failing the upload over it would refuse a sheet for a
+ * nobody typed this one. Failing the upload over it would refuse a character for a
  * characteristic the game master may not even use, so the field is simply
  * dropped, and it stays at the zero every unfilled characteristic starts at.
  */
@@ -133,23 +147,27 @@ export const characterRoutes = {
       }
 
       const sheetFile = fileField(form, "sheet");
-      if (!sheetFile) throw errors.badRequest("Please choose an HTML character sheet to upload.");
-      // An image the game master chose wins; otherwise the sheet may carry one.
+      if (!sheetFile) {
+        throw errors.badRequest("Please choose a HERO Designer character file to upload.");
+      }
+      // An image the game master chose wins; otherwise the character file's own
+      // portrait stands, whether it arrives beside the file or still inside it.
       const imageFile = fileField(form, "card");
-      requireTotalWithinLimit(sheetFile, imageFile);
+      const portraitFile = fileField(form, "sheetPortrait");
+      requireTotalWithinLimit(sheetFile, imageFile, portraitFile);
 
       const sheet = await storeSheet(sheetFile);
       const card = imageFile
         ? await storeImage(imageFile)
-        : await portraitOrNone(sheet, logger);
+        : await portraitOrNone(sheet, portraitFile, logger);
 
-      // What the form said, over what the sheet says about itself.
+      // What the form said, over what the character file says about itself.
       //
-      // The dialog sends all seven boxes, so for that path this changes nothing:
-      // the browser has already read the sheet and filled them in, and what
+      // The dialog sends all eight boxes, so for that path this changes nothing:
+      // it has already asked what the file says and filled them in, and what
       // arrives here is what the game master saw and could have corrected.
       //
-      // The path this is for is a folder of sheets dropped on a campaign, which
+      // The path this is for is a folder of files dropped on a campaign, which
       // sends a name and a file and nothing else. Those characters were filed at
       // zero across the board until now, and every number needed typing in
       // afterwards — from the same file that was already on disk.
@@ -171,6 +189,30 @@ export const characterRoutes = {
       });
 
       return json({ character: presentCharacter(character) }, { status: 201 });
+    }),
+  },
+
+  /**
+   * What a character file says its character's characteristics are.
+   *
+   * The add and edit dialogs fill their boxes in as a file is chosen, so a game
+   * master sees the numbers and can correct them before saving. Working them out
+   * needs the game system's rules — megabytes of JSON the browser has no business
+   * holding — so the browser asks instead.
+   *
+   * Nothing is stored. The file is read, answered about, and dropped; the upload
+   * that files the character is a separate request, and the browser has already
+   * taken the portrait out of what it sends here, so this is tens of kilobytes
+   * rather than the megabytes the file weighs on disk.
+   */
+  "/api/characters/stats": {
+    POST: handler(async (request: BunRequest) => {
+      requireGm(request);
+      const form = await request.formData();
+      const file = fileField(form, "hdc");
+      if (!file) throw errors.badRequest("Please choose a HERO Designer character file.");
+      const bytes = await readUploadedFile(file, "character file");
+      return json({ stats: withinBounds(await statsFromHdc(bytes, file.name)) });
     }),
   },
 
@@ -221,26 +263,27 @@ export const characterRoutes = {
 
         const sheetFile = fileField(form, "sheet");
         const imageFile = fileField(form, "card");
-        requireTotalWithinLimit(sheetFile, imageFile);
+        const portraitFile = fileField(form, "sheetPortrait");
+        requireTotalWithinLimit(sheetFile, imageFile, portraitFile);
 
         const sheet = sheetFile ? await storeSheet(sheetFile) : null;
         if (sheet) changes.sheetUploadId = sheet.id;
 
-        // What the form said, over what the new sheet says about itself — the
+        // What the form said, over what the new file says about itself — the
         // same order the create route uses, and for the same reason.
         //
-        // The edit dialog sends all eight boxes, having read the sheet in the
-        // browser as it was chosen, so nothing here changes that path. This is
-        // for a sheet dropped on the character panel over a character that
-        // already exists: that sends the file and nothing else, and without this
-        // it would replace the sheet and leave the numbers as they were — stale
+        // The edit dialog sends all eight boxes, having asked what the file says
+        // as it was chosen, so nothing here changes that path. This is for a
+        // file dropped on the character panel over a character that already
+        // exists: that sends the file and nothing else, and without this it
+        // would replace the file and leave the numbers as they were — stale
         // against the very file that had just been dropped to update them.
         const fromSheet = sheet ? withinBounds(await statsFromSheet(sheet)) : {};
         for (const [field, value] of Object.entries({ ...fromSheet, ...typed })) {
           changes[field as keyof ReturnType<typeof statsFromForm>] = value;
         }
 
-        // Whether a portrait in the sheet may displace a picture the character
+        // Whether the file's own portrait may displace a picture the character
         // already has. Off by default, and the dialog leaves it off: it carries a
         // card-image field and a remove box, so a game master editing there has
         // chosen the picture and a file must not overrule that choice.
@@ -256,7 +299,7 @@ export const characterRoutes = {
         } else if (form.get("removeCard") === "true") {
           changes.cardUploadId = null;
         } else if (sheet && (portraitWins || !character.card_upload_id)) {
-          const portrait = await portraitOrNone(sheet, logger);
+          const portrait = await portraitOrNone(sheet, portraitFile, logger);
           if (portrait) changes.cardUploadId = portrait.id;
         }
 

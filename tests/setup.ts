@@ -21,3 +21,8 @@ process.env.PLAYER_GRACE_MS = "300";
 // Imported after the environment is set, so the connection opens on the scratch file.
 const { migrate } = await import("../src/db/migrate.ts");
 migrate();
+
+// The HERO rules data is not in this repository — it is Hero Games' own, and an
+// operator extracts it from their copy of HERO Designer. A run that has it set
+// exercises the sheet rendering and the characteristics; a run that does not
+// skips those and tests everything else. See `rulesAvailable` in helpers.ts.

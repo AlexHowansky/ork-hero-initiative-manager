@@ -5,14 +5,18 @@
  * one is through these handlers — which means every request is authenticated and
  * authorised first.
  *
- * Character sheets are the sensitive case: they carry the game master's own
- * JavaScript. They are served with a `sandbox` Content-Security-Policy, which
- * puts the document in an *opaque origin*. It is same-site by URL, but the
- * browser treats it as its own origin with no relationship to the app: it cannot
- * read `document.cookie`, touch `localStorage`, reach into the parent frame, or
- * call the API as the signed-in user. The embedding iframe repeats the sandbox
- * as an attribute, so the restriction holds even if the frame is reached some
- * other way.
+ * Character sheets are the sensitive case. They are no longer stored at all —
+ * each one is rendered from the character file on request — but they are still
+ * not this app's markup to trust: a character's own notes fields carry whatever
+ * CSS and web fonts the game master put in HERO Designer, and the export
+ * template is a document in its own right. So they are served exactly as the
+ * uploaded HTML sheets were, with a `sandbox` Content-Security-Policy that puts
+ * the document in an *opaque origin*. It is same-site by URL, but the browser
+ * treats it as its own origin with no relationship to the app: it cannot read
+ * `document.cookie`, touch `localStorage`, reach into the parent frame, or call
+ * the API as the signed-in user. The embedding iframe repeats the sandbox as an
+ * attribute, so the restriction holds even if the frame is reached some other
+ * way.
  */
 
 import type { BunRequest } from "bun";
@@ -21,6 +25,8 @@ import { errors } from "../../lib/errors.ts";
 import { currentGm, currentPlayer } from "../middleware/auth.ts";
 import { campaigns, characters, uploads } from "../../db/queries.ts";
 import { uploadPath } from "../uploads.ts";
+import { HDC_MIME, renderSheet } from "../hero-sheet.ts";
+import { log } from "../../lib/log.ts";
 import type { UploadRow } from "../../db/types.ts";
 
 /** Streams an upload from disk, or 404s if the row points at a missing file. */
@@ -34,11 +40,17 @@ async function serveUpload(upload: UploadRow, headers: Record<string, string>): 
 
 export const fileRoutes = {
   /**
-   * A character's sheet.
+   * A character's sheet, rendered now.
    *
    * Readable by the game master who owns the campaign, or by the one player who
    * has claimed that character in an active session. Everyone else gets a 404
    * rather than a 403, so probing character ids reveals nothing about what exists.
+   *
+   * Nothing is stored or cached. What is on disk is the character file; the
+   * sheet is what that character looks like through today's export template and
+   * today's rules, built fresh every time anyone opens it. Re-export a character
+   * and drop the file back, and the next person to look sees the new one, with
+   * nothing to invalidate.
    */
   "/sheets/:characterId": {
     GET: handler(async (request: BunRequest<"/sheets/:characterId">) => {
@@ -63,22 +75,53 @@ export const fileRoutes = {
       const upload = uploads.byId(character.sheet_upload_id);
       if (!upload) throw errors.notFound("That character sheet is no longer available.");
 
-      return await serveUpload(upload, {
-        "Content-Type": "text/html; charset=utf-8",
-        // The isolation boundary. `sandbox` with only `allow-scripts` gives the
-        // document an opaque origin: its JavaScript still runs, but it has no
-        // access to this app's cookies, storage, DOM or authenticated API.
-        // `frame-ancestors 'self'` keeps the sheet embeddable by this app and
-        // nobody else's site.
-        "Content-Security-Policy":
-          "sandbox allow-scripts allow-forms allow-popups; frame-ancestors 'self'",
-        // Overrides the app-wide DENY: a sheet exists to be framed by this app.
-        // The sandbox above is what makes that safe.
-        "X-Frame-Options": "SAMEORIGIN",
-        "Content-Disposition": "inline",
-        "Referrer-Policy": "no-referrer",
-        "Cache-Control": "private, no-store",
-        "X-Content-Type-Options": "nosniff",
+      // Characters filed before this app read `.hdc` files have an HTML sheet
+      // stored against them, and there is nothing to render one from. Said
+      // plainly, because the fix is a file the game master already has.
+      if (upload.mime !== HDC_MIME) {
+        throw errors.notFound(
+          "This character was filed from an HTML sheet, which this app no longer reads. " +
+            "Upload their .hdc file to see their sheet.",
+        );
+      }
+
+      const file = Bun.file(uploadPath(upload));
+      if (!(await file.exists())) {
+        throw errors.notFound("That character sheet is no longer available.");
+      }
+
+      let html: string;
+      try {
+        html = await renderSheet(new Uint8Array(await file.arrayBuffer()), upload);
+      } catch (error) {
+        // Not a 404, which everything above it is: those say "this is not yours
+        // to see", and this says "this is yours and it would not build". A game
+        // master told the wrong one of those goes looking for the wrong problem.
+        log.error("could not render a character sheet", { characterId, error });
+        throw errors.internal(
+          "We couldn't build this character's sheet. Please re-export them from HERO Designer.",
+        );
+      }
+
+      return new Response(html, {
+        headers: {
+          "Content-Type": "text/html; charset=utf-8",
+          // The isolation boundary. `sandbox` with only `allow-scripts` gives the
+          // document an opaque origin: its JavaScript still runs, but it has no
+          // access to this app's cookies, storage, DOM or authenticated API.
+          // `frame-ancestors 'self'` keeps the sheet embeddable by this app and
+          // nobody else's site.
+          "Content-Security-Policy":
+            "sandbox allow-scripts allow-forms allow-popups; frame-ancestors 'self'",
+          // Overrides the app-wide DENY: a sheet exists to be framed by this app.
+          // The sandbox above is what makes that safe.
+          "X-Frame-Options": "SAMEORIGIN",
+          "Content-Disposition": "inline",
+          "Referrer-Policy": "no-referrer",
+          // Doubly true now: there is no stored artifact to go stale.
+          "Cache-Control": "private, no-store",
+          "X-Content-Type-Options": "nosniff",
+        },
       });
     }),
   },

@@ -1,0 +1,215 @@
+/**
+ * Taking a HERO Designer character file apart before it is uploaded.
+ *
+ * A `.hdc` carries the character's portrait inside it, as base64 in UTF-16 —
+ * which costs nearly three bytes for every one of the picture's. It is almost
+ * the whole of what one of these files weighs: a 1.3 MB portrait makes a 3.7 MB
+ * character file, of which 92 KB is the character.
+ *
+ * The server can take that apart perfectly well, and still does for a file that
+ * reaches it whole. Doing it here first is about what crosses the wire: the same
+ * upload becomes tens of kilobytes rather than several megabytes, twice over
+ * (the dialog reads the characteristics off a file as it is chosen, and then
+ * uploads it), and a character whose portrait would have pushed the file past
+ * `UPLOAD_LIMIT_BYTES` can be filed at all.
+ *
+ * Nothing here is load-bearing. Every step falls back to handing the file over
+ * as it arrived, because the server does all of this anyway — this is a saving,
+ * never a correctness step, and it must never be the reason a character cannot
+ * be filed.
+ *
+ * The renderer library is not imported. Its decoder uses `Buffer`, and what is
+ * needed here — a byte-order mark, one element, and a canvas — is smaller than
+ * the shim would be.
+ */
+
+import { CARD_IMAGE_PX } from "../lib/cards.ts";
+
+/**
+ * The shorter side a portrait is scaled to, matching `limits.storedImagePx` on
+ * the server.
+ *
+ * Twice the largest card a game master can choose, because a 350px card on a 2×
+ * screen needs 700 device pixels. The server re-fits whatever arrives and never
+ * enlarges, so a picture sized here passes through it untouched — and the two
+ * numbers must not drift, which is why this is the same constant.
+ */
+const PORTRAIT_PX = CARD_IMAGE_PX.max * 2;
+
+/** What `fitToCard` encodes at, so a picture is not re-compressed to a different one. */
+const WEBP_QUALITY = 0.8;
+
+/** The whole `IMAGE` element, in both the forms an XML writer may produce. */
+const IMAGE_ELEMENT = /[ \t]*<IMAGE\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/IMAGE>)\r?\n?/;
+
+/** Its contents and its `FileName`, for the picture and for what to call it. */
+const IMAGE_BODY = /<IMAGE\b([^>]*)>([\s\S]*?)<\/IMAGE>/;
+const IMAGE_NAME = /FileName="([^"]*)"/;
+
+/**
+ * The CDATA section HERO Designer wraps the picture in.
+ *
+ * Base64 needs no escaping, so the wrapper carries no information — but it is
+ * there, and feeding its markers to `atob` is an error rather than a few stray
+ * bytes.
+ */
+const CDATA = /^\s*<!\[CDATA\[([\s\S]*?)\]\]>\s*$/;
+
+export interface SplitCharacter {
+  /** The character file with its picture removed. */
+  readonly hdc: File;
+  /** The picture, sized for a card — null when the file carried none. */
+  readonly portrait: File | null;
+}
+
+/**
+ * Decodes a character file, whatever HERO Designer wrote it as.
+ *
+ * The byte-order mark is the authority and the XML declaration is not: these
+ * files are UTF-16 **big** endian with a mark, while the declaration inside says
+ * only `encoding="UTF-16"`, so trusting it — or assuming the little-endian
+ * default most tools use — gives mojibake for every character in the file.
+ *
+ * A file with no mark still gives itself away, because XML must begin with `<`:
+ * one half of the first code unit is then a zero byte.
+ */
+function decode(bytes: Uint8Array): { text: string; label: string } {
+  const label = bytes[0] === 0xfe && bytes[1] === 0xff
+    ? "utf-16be"
+    : bytes[0] === 0xff && bytes[1] === 0xfe
+    ? "utf-16le"
+    : bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf
+    ? "utf-8"
+    : bytes[0] === 0x00 && bytes[1] !== 0x00
+    ? "utf-16be"
+    : bytes[1] === 0x00 && bytes[0] !== 0x00
+    ? "utf-16le"
+    : "utf-8";
+  // `ignoreBOM` defaults to false, which strips the mark rather than leaving it
+  // as a zero-width space at the front of the document.
+  return { text: new TextDecoder(label).decode(bytes), label };
+}
+
+/** Text back to bytes, carrying the mark the file is identified by. */
+function encode(text: string, label: string): Uint8Array {
+  if (label === "utf-8") {
+    const body = new TextEncoder().encode(text);
+    const out = new Uint8Array(body.byteLength + 3);
+    out.set([0xef, 0xbb, 0xbf]);
+    out.set(body, 3);
+    return out;
+  }
+
+  const bigEndian = label !== "utf-16le";
+  // One code unit per character: `text` is UTF-16 already, so a surrogate pair
+  // is two units and copies across unchanged.
+  const out = new Uint8Array((text.length + 1) * 2);
+  const view = new DataView(out.buffer);
+  view.setUint16(0, 0xfeff, !bigEndian);
+  for (let index = 0; index < text.length; index += 1) {
+    view.setUint16((index + 1) * 2, text.charCodeAt(index), !bigEndian);
+  }
+  return out;
+}
+
+/**
+ * Scales a picture down to the size a card shows it at, and encodes it as WebP.
+ *
+ * The same rule the server applies (`fitToCard`): the shorter side covers the
+ * card's square, nothing is cropped, nothing is enlarged. Encoding is left to
+ * the browser, which is why the result is checked rather than assumed — WebP
+ * from a canvas is not universal, and a browser that will not produce it hands
+ * back a PNG instead, which the server is perfectly happy to re-encode.
+ *
+ * Anything that goes wrong returns the picture as it was. The server re-fits
+ * whatever arrives, so the worst case here is a larger upload, never a wrong
+ * one.
+ */
+async function fitPortrait(bytes: Uint8Array, name: string): Promise<File> {
+  const asExtracted = () => new File([bytes as BlobPart], name);
+  try {
+    if (typeof createImageBitmap !== "function" || typeof OffscreenCanvas !== "function") {
+      return asExtracted();
+    }
+
+    const source = await createImageBitmap(new Blob([bytes as BlobPart]));
+    const shorter = Math.min(source.width, source.height);
+    const scale = shorter > PORTRAIT_PX ? PORTRAIT_PX / shorter : 1;
+    const width = Math.round(source.width * scale);
+    const height = Math.round(source.height * scale);
+
+    // `resizeQuality` is the decoder's own resampling, which is better than
+    // drawing a full-size bitmap into a small canvas.
+    const fitted = scale === 1
+      ? source
+      : await createImageBitmap(source, {
+        resizeWidth: width,
+        resizeHeight: height,
+        resizeQuality: "high",
+      });
+
+    const canvas = new OffscreenCanvas(width, height);
+    const context = canvas.getContext("2d");
+    if (!context) return asExtracted();
+    context.drawImage(fitted, 0, 0, width, height);
+
+    const blob = await canvas.convertToBlob({ type: "image/webp", quality: WEBP_QUALITY });
+    source.close();
+    if (fitted !== source) fitted.close();
+
+    // A picture that grew is one the browser has re-compressed badly — an
+    // already-lossy source encoded again. The original stands, as it does on
+    // the server.
+    if (blob.size >= bytes.byteLength) return asExtracted();
+
+    const extension = blob.type === "image/webp" ? "webp" : blob.type.replace("image/", "");
+    return new File([blob], `${name.replace(/\.[^.]+$/, "")}.${extension}`, { type: blob.type });
+  } catch {
+    return asExtracted();
+  }
+}
+
+/**
+ * A character file separated into the character and its picture.
+ *
+ * A file with no picture in it comes back with `portrait: null` and its own
+ * bytes unchanged — there is nothing to save and nothing to send.
+ *
+ * The character file is re-encoded in the encoding it arrived in rather than in
+ * whatever is cheapest, so what the server stores is still a `.hdc`: a file
+ * whose declaration says UTF-16 over UTF-8 bytes is one this app would read and
+ * HERO Designer would not.
+ */
+export async function splitCharacterFile(file: File): Promise<SplitCharacter> {
+  const unchanged: SplitCharacter = { hdc: file, portrait: null };
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const { text, label } = decode(bytes);
+
+    const found = IMAGE_BODY.exec(text);
+    if (!found) return unchanged;
+
+    const stripped = text.replace(IMAGE_ELEMENT, "");
+    if (stripped === text) return unchanged;
+
+    const hdc = new File([encode(stripped, label) as BlobPart], file.name, { type: file.type });
+
+    // Base64 in these files sits inside a CDATA section, wrapped and indented,
+    // and `atob` will have neither the markers nor the whitespace.
+    const body = found[2]!;
+    const encoded = (CDATA.exec(body)?.[1] ?? body).replace(/\s+/g, "");
+    let picture: Uint8Array;
+    try {
+      picture = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+    } catch {
+      // The picture is unreadable but the character is not, so file the
+      // character and let the server find nothing where the picture was.
+      return { hdc, portrait: null };
+    }
+
+    const name = IMAGE_NAME.exec(found[1] ?? "")?.[1] ?? "portrait.png";
+    return { hdc, portrait: await fitPortrait(picture, name.replace(/[^\w.\- ]/g, "_")) };
+  } catch {
+    return unchanged;
+  }
+}

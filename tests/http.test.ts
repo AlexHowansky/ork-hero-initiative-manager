@@ -12,9 +12,10 @@ import { serverOptions } from "../src/server/app.ts";
 import { registerServer } from "../src/server/ws.ts";
 import sharp from "sharp";
 import { gms } from "../src/db/queries.ts";
+import { db } from "../src/db/index.ts";
 import { CARD_IMAGE_PX } from "../src/lib/cards.ts";
 import { config, limits } from "../src/lib/config.ts";
-import { unique } from "./helpers.ts";
+import { hdcBytes, hdcFile, rulesAvailable, unique } from "./helpers.ts";
 import {
   LOG_CLEARED,
   SESSION_STARTED,
@@ -89,7 +90,7 @@ async function makeTable(cookie: string) {
     form.set("name", unique(kind));
     form.set("speed", "12");
     form.set("dexterity", String(dexterity));
-    form.set("sheet", new File(["<h1>sheet</h1>"], "sheet.html"));
+    form.set("sheet", hdcFile());
     const response = await fetch(
       `${base}/api/characters`,
       authed(cookie, { method: "POST", body: form }),
@@ -152,7 +153,7 @@ async function addCardedCharacter(
   form.set("campaignId", campaignId);
   form.set("kind", kind);
   form.set("name", unique(kind));
-  form.set("sheet", new File(["<h1>sheet</h1>"], "sheet.html"));
+  form.set("sheet", hdcFile());
   form.set("card", cardImage(tag));
   const response = await fetch(
     `${base}/api/characters`,
@@ -302,7 +303,14 @@ describe("one game master cannot see another's material", () => {
 });
 
 describe("character sheets reach only the right people", () => {
-  test("a player opens their own sheet and nobody else's", async () => {
+  /**
+   * A table with two player characters staged, one of them claimed by Alice.
+   *
+   * Shared because the two tests below are the two halves of one question — who
+   * is refused, and who is served — and only the second needs the rules data to
+   * render anything.
+   */
+  const table = async () => {
     const gm = await signIn();
     const { pc, npc, session } = await makeTable(gm.cookie);
 
@@ -311,7 +319,7 @@ describe("character sheets reach only the right people", () => {
     form.set("campaignId", pc.campaignId);
     form.set("kind", "pc");
     form.set("name", unique("pc"));
-    form.set("sheet", new File(["<h1>other</h1>"], "sheet.html"));
+    form.set("sheet", hdcFile("Other.hdc"));
     const other = (
       await (await fetch(`${base}/api/characters`, authed(gm.cookie, { method: "POST", body: form }))).json()
     ).character;
@@ -334,28 +342,63 @@ describe("character sheets reach only the right people", () => {
       }),
     );
 
-    // Her own character: allowed.
-    expect((await fetch(`${base}/sheets/${pc.id}`, { headers: { Cookie: alice } })).status).toBe(200);
-    // Another player's character, and an NPC: both hidden.
-    expect((await fetch(`${base}/sheets/${other.id}`, { headers: { Cookie: alice } })).status).toBe(404);
-    expect((await fetch(`${base}/sheets/${npc.id}`, { headers: { Cookie: alice } })).status).toBe(404);
-    // The game master sees everything in their own campaign.
-    expect((await fetch(`${base}/sheets/${npc.id}`, { headers: { Cookie: gm.cookie } })).status).toBe(200);
+    return { gm, alice, pc, npc, other };
+  };
+
+  const status = async (id: string, cookie: string) =>
+    (await fetch(`${base}/sheets/${id}`, { headers: { Cookie: cookie } })).status;
+
+  test("a player is refused every sheet but their own", async () => {
+    const { alice, other, npc } = await table();
+
+    // Another player's character, and an NPC: both hidden, and hidden as "not
+    // found" so that probing ids says nothing about what exists.
+    expect(await status(other.id, alice)).toBe(404);
+    expect(await status(npc.id, alice)).toBe(404);
   });
 
-  test("a sheet is served into an opaque origin", async () => {
+  test.skipIf(!rulesAvailable)("and served the one they claimed, as the game master is served all of them", async () => {
+    const { gm, alice, pc, npc } = await table();
+
+    expect(await status(pc.id, alice)).toBe(200);
+    // The game master sees everything in their own campaign.
+    expect(await status(npc.id, gm.cookie)).toBe(200);
+  });
+
+  test.skipIf(!rulesAvailable)("a sheet is served into an opaque origin", async () => {
     const gm = await signIn();
     const { pc } = await makeTable(gm.cookie);
 
     const response = await fetch(`${base}/sheets/${pc.id}`, { headers: { Cookie: gm.cookie } });
     const policy = response.headers.get("content-security-policy") ?? "";
 
-    // `sandbox` without `allow-same-origin` is what denies the sheet access to
-    // this app's cookies, storage and DOM.
+    // The sheet is this app's own output now, rather than an uploaded document —
+    // but it still carries whatever CSS and web fonts the game master wrote into
+    // the character, so `sandbox` without `allow-same-origin` is still what
+    // denies it access to this app's cookies, storage and DOM.
     expect(policy).toContain("sandbox");
     expect(policy).not.toContain("allow-same-origin");
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("content-type")).toContain("text/html");
+    // Nothing is stored to go stale, and nothing is kept by anything in between.
+    expect(response.headers.get("cache-control")).toContain("no-store");
+  });
+
+  test("a character filed from an HTML sheet says so rather than 404ing quietly", async () => {
+    const gm = await signIn();
+    const { pc } = await makeTable(gm.cookie);
+
+    // What a library filed before this app read `.hdc` files looks like. The row
+    // is written straight into the database rather than uploaded, because the
+    // upload route will not take an HTML sheet any more — which is the point.
+    db.query(
+      "UPDATE uploads SET mime = 'text/html' " +
+        "WHERE id = (SELECT sheet_upload_id FROM characters WHERE id = ?)",
+    ).run(pc.id);
+
+    const response = await fetch(`${base}/sheets/${pc.id}`, { headers: { Cookie: gm.cookie } });
+    expect(response.status).toBe(404);
+    expect((await response.json()).error.message).toMatch(/\.hdc/);
   });
 });
 
@@ -374,7 +417,7 @@ describe("HERO characteristics", () => {
     form.set("campaignId", campaign.id);
     form.set("kind", "npc");
     form.set("name", unique("Ogre"));
-    form.set("sheet", new File(["<h1>sheet</h1>"], "sheet.html"));
+    form.set("sheet", hdcFile());
     form.set("speed", "4");
     form.set("dexterity", "18");
     form.set("initiative", "2");
@@ -448,7 +491,7 @@ describe("HERO characteristics", () => {
     form.set("campaignId", campaign.id);
     form.set("kind", "npc");
     form.set("name", unique("Blur"));
-    form.set("sheet", new File(["<h1>sheet</h1>"], "sheet.html"));
+    form.set("sheet", hdcFile());
     form.set("speed", "13");
     const response = await fetch(
       `${base}/api/characters`,
@@ -1543,7 +1586,7 @@ async function addPc(cookie: string, campaignId: string, sessionId: string) {
   form.set("name", unique("pc"));
   form.set("speed", "12");
   form.set("dexterity", "15");
-  form.set("sheet", new File(["<h1>sheet</h1>"], "sheet.html"));
+  form.set("sheet", hdcFile());
   const character = (
     await (
       await fetch(`${base}/api/characters`, authed(cookie, { method: "POST", body: form }))
@@ -2400,13 +2443,9 @@ describe("a sheet's own picture becomes the character's", () => {
     return data;
   }
 
-  /** A sheet saved the way a browser saves one: the picture is inside it. */
+  /** A character file as HERO Designer saves one: the picture is inside it. */
   function sheetWithPortrait(): File {
-    const portrait = Buffer.from(image(PNG_HEADER, 4096)).toString("base64");
-    return new File(
-      [`<h1>Hero</h1><img src="data:image/png;base64,${portrait}">`],
-      "hero.html",
-    );
+    return hdcFile("Hero.hdc", { name: "Hero", image: image(PNG_HEADER, 4096) });
   }
 
   async function addCharacter(cookie: string, campaignId: string, fields: FormData) {
@@ -2437,31 +2476,35 @@ describe("a sheet's own picture becomes the character's", () => {
     expect(await pictureType(cookie, character.cardUrl)).toBe("image/png");
   });
 
-  test("and the sheet is served without the copy it carried", async () => {
-    const { cookie } = await signIn();
-    const { campaign } = await makeTable(cookie);
+  test.skipIf(!rulesAvailable)(
+    "and the sheet is rendered without the copy it carried",
+    async () => {
+      const { cookie } = await signIn();
+      const { campaign } = await makeTable(cookie);
 
-    // The same picture the sheet is built around, as the browser encoded it.
-    const portrait = Buffer.from(image(PNG_HEADER, 4096)).toString("base64");
+      // The same picture the character file is built around, encoded as the file
+      // itself stores it.
+      const portrait = Buffer.from(image(PNG_HEADER, 4096)).toString("base64");
 
-    const form = new FormData();
-    form.set("sheet", sheetWithPortrait());
-    const character = await addCharacter(cookie, campaign.id, form);
-    expect(character.cardUrl).not.toBeNull();
+      const form = new FormData();
+      form.set("sheet", sheetWithPortrait());
+      const character = await addCharacter(cookie, campaign.id, form);
+      expect(character.cardUrl).not.toBeNull();
 
-    const html = await (await fetch(base + character.sheetUrl, authed(cookie))).text();
-    // The picture is a card now, so the sheet no longer carries it as well.
-    expect(html).not.toContain(portrait);
-    // Everything else about the sheet is the file that was uploaded.
-    expect(html).toContain("<h1>Hero</h1>");
-  });
+      const html = await (await fetch(base + character.sheetUrl, authed(cookie))).text();
+      // The picture is a card now, so the sheet no longer carries it as well.
+      expect(html).not.toContain(portrait.slice(0, 200));
+      // And it is still that character's sheet.
+      expect(html).toContain("Hero");
+    },
+  );
 
   test("a sheet with no picture in it leaves the character without one", async () => {
     const { cookie } = await signIn();
     const { campaign } = await makeTable(cookie);
 
     const form = new FormData();
-    form.set("sheet", new File(["<h1>Hero</h1>"], "hero.html"));
+    form.set("sheet", hdcFile("Hero.hdc"));
     const character = await addCharacter(cookie, campaign.id, form);
 
     expect(character.cardUrl).toBeNull();
@@ -2485,7 +2528,7 @@ describe("a sheet's own picture becomes the character's", () => {
     const { campaign } = await makeTable(cookie);
 
     const bare = new FormData();
-    bare.set("sheet", new File(["<h1>Hero</h1>"], "hero.html"));
+    bare.set("sheet", hdcFile("Hero.hdc"));
     const character = await addCharacter(cookie, campaign.id, bare);
     expect(character.cardUrl).toBeNull();
 
@@ -2506,11 +2549,7 @@ describe("a sheet's own picture becomes the character's", () => {
 
     // Now there is a picture, a later sheet must not replace it.
     const gifSheet = new FormData();
-    const gif = Buffer.from(image(GIF_HEADER, 8000)).toString("base64");
-    gifSheet.set(
-      "sheet",
-      new File([`<img src="data:image/gif;base64,${gif}">`], "hero2.html"),
-    );
+    gifSheet.set("sheet", hdcFile("Hero2.hdc", { image: image(GIF_HEADER, 8000) }));
     const kept = await patch(gifSheet);
     expect(kept.cardUrl).toBe(filled.cardUrl);
   });
@@ -2570,7 +2609,7 @@ describe("pictures are stored at the size a card shows them", () => {
     form.set("campaignId", campaign.id);
     form.set("kind", "pc");
     form.set("name", unique("Hero"));
-    form.set("sheet", new File(["<h1>sheet</h1>"], "sheet.html"));
+    form.set("sheet", hdcFile());
     form.set("card", new File([await picture(2400, 1800)], "huge.png"));
 
     const character = (await (
@@ -2834,7 +2873,7 @@ describe("a character who is playing cannot be deleted", () => {
     form.set("campaignId", playing.campaign.id);
     form.set("kind", "npc");
     form.set("name", unique("Understudy"));
-    form.set("sheet", new File(["<h1>sheet</h1>"], "sheet.html"));
+    form.set("sheet", hdcFile());
     const { character } = await (
       await fetch(`${base}/api/characters`, authed(cookie, { method: "POST", body: form }))
     ).json();
@@ -2857,7 +2896,7 @@ describe("a character is refiled by being moved to another campaign", () => {
     form.set("campaignId", campaign.id);
     form.set("kind", "pc");
     form.set("name", characterName ?? unique("Hero"));
-    form.set("sheet", new File(["<h1>sheet</h1>"], "sheet.html"));
+    form.set("sheet", hdcFile());
     const { character } = await (
       await fetch(`${base}/api/characters`, authed(cookie, { method: "POST", body: form }))
     ).json();
@@ -2937,9 +2976,23 @@ describe("a character is refiled by being moved to another campaign", () => {
 });
 
 describe("the upload limit covers a whole submission", () => {
-  /** Half the limit, plus a little: two of these are over it, one is not. */
-  function half(): string {
-    return "x".repeat(Math.floor(limits.uploadBytes / 2) + 1024);
+  /**
+   * A character file just over half the limit: two of these are over it, one is
+   * not.
+   *
+   * Padded with a picture, because a character file is parsed before it is
+   * stored and a megabyte of filler is not one. The picture's own bytes are
+   * roughly a third of what they cost in the file — base64 in UTF-16 — which is
+   * what the divisor is for; the assertions keep it honest if that ever changes.
+   */
+  function half(): Uint8Array {
+    const target = Math.floor(limits.uploadBytes / 2) + 1024;
+    const picture = new Uint8Array(Math.ceil(target / 2.7));
+    picture.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const bytes = hdcBytes({ image: picture });
+    expect(bytes.byteLength).toBeGreaterThan(Math.floor(limits.uploadBytes / 2));
+    expect(bytes.byteLength).toBeLessThan(limits.uploadBytes);
+    return bytes;
   }
 
   test("a sheet and a picture together cannot exceed it", async () => {
@@ -2959,7 +3012,7 @@ describe("the upload limit covers a whole submission", () => {
     form.set("campaignId", campaign.id);
     form.set("kind", "npc");
     form.set("name", unique("Heavy"));
-    form.set("sheet", new File([half()], "sheet.html"));
+    form.set("sheet", new File([half() as BlobPart], "sheet.hdc"));
     form.set("card", new File([picture], "card.png", { type: "image/png" }));
 
     const response = await fetch(
@@ -2987,7 +3040,7 @@ describe("the upload limit covers a whole submission", () => {
     form.set("campaignId", campaign.id);
     form.set("kind", "npc");
     form.set("name", unique("Heavy"));
-    form.set("sheet", new File([half()], "sheet.html"));
+    form.set("sheet", new File([half() as BlobPart], "sheet.hdc"));
 
     const response = await fetch(
       `${base}/api/characters`,
@@ -3113,7 +3166,7 @@ describe("a monster from another campaign", () => {
     form.set("campaignId", campaign.id);
     form.set("kind", kind);
     form.set("name", unique(kind));
-    form.set("sheet", new File(["<h1>sheet</h1>"], "sheet.html"));
+    form.set("sheet", hdcFile());
     return (
       await (await fetch(`${base}/api/characters`, authed(cookie, { method: "POST", body: form })))
         .json()
@@ -3216,37 +3269,36 @@ describe("a monster from another campaign", () => {
   });
 });
 
-describe("a sheet that knows its own characteristics", () => {
-  /** A cut-down Ork HERO export: the marker, the table, and one talent. */
-  const sheet = (options: { marked?: boolean; speed?: string; reflexes?: string } = {}) => {
-    const rows: [string, string][] = [
-      ["23", "DEX"],
-      ["10", "CON"],
-      ["12", "BODY"],
-      [options.speed ?? "4", "SPD"],
-      ["8", "REC"],
-      ["30", "END"],
-      ["31", "STUN"],
-      ["Total Characteristic Points", "85"],
-    ];
-    return [
-      options.marked === false ? "<!-- someone else's export -->" : "<!--\n\nGenerated by Ork HERO Templates\n\n-->",
-      '<div id="characteristics-collapse"><table><tbody>',
-      ...rows.map(([value, name]) => `<tr><td><span class="primary">${value}</span></td><td>${name}</td></tr>`),
-      "</tbody></table></div>",
-      '<div id="talents-collapse"><table><tbody>',
-      `<tr><td>${options.reflexes ?? "Lightning Calculator"}&nbsp;</td></tr>`,
-      "</tbody></table></div>",
-    ].join("\n");
-  };
+describe.skipIf(!rulesAvailable)("a character file that knows its own characteristics", () => {
+  /**
+   * A character file with the levels that give the numbers below.
+   *
+   * A file stores levels *bought*, not the value a sheet prints: the game
+   * system's base is added to them, and some of it is figured from other
+   * characteristics — SPD's base is one plus a tenth of DEX, so these numbers are
+   * only what they are together.
+   */
+  const character = (options: { speed?: number; reflexes?: number } = {}) =>
+    hdcFile("Hero.hdc", {
+      characteristics: {
+        DEX: 13,
+        CON: 0,
+        BODY: 2,
+        SPD: options.speed ?? 2,
+        REC: 4,
+        END: 10,
+        STUN: 11,
+      },
+      ...(options.reflexes === undefined ? {} : { lightningReflexes: options.reflexes }),
+    });
 
-  /** Files a character the way a dropped folder of sheets does: no stat fields. */
-  const drop = async (cookie: string, campaignId: string, html: string) => {
+  /** Files a character the way a dropped folder of them does: no stat fields. */
+  const drop = async (cookie: string, campaignId: string, file: File) => {
     const form = new FormData();
     form.set("campaignId", campaignId);
     form.set("kind", "npc");
     form.set("name", unique("Dropped"));
-    form.set("sheet", new File([html], "hero.html"));
+    form.set("sheet", file);
     const response = await fetch(
       `${base}/api/characters`,
       authed(cookie, { method: "POST", body: form }),
@@ -3259,24 +3311,30 @@ describe("a sheet that knows its own characteristics", () => {
     const { cookie } = await signIn();
     const table = await makeTable(cookie);
 
-    // A folder of sheets dropped on a campaign sends a name and a file. These
-    // characters were filed at zero across the board before the sheet was read.
-    const character = await drop(
-      cookie,
-      table.campaign.id,
-      sheet({ reflexes: "Lightning Reflexes: +4 DEX to act first with All Actions" }),
-    );
+    // A folder of character files dropped on a campaign sends a name and a file.
+    // These characters were filed at zero across the board before the file was
+    // read.
+    const filed = await drop(cookie, table.campaign.id, character({ reflexes: 4 }));
 
-    expect(character).toMatchObject({
+    expect(filed).toMatchObject({
       dexterity: 23,
       constitution: 10,
       body: 12,
-      speed: 4,
+      speed: 5,
       recovery: 8,
       endurance: 30,
-      stun: 31,
+      stun: 33,
       initiative: 4,
     });
+  });
+
+  test("reads no initiative bonus where the character has no such talent", async () => {
+    const { cookie } = await signIn();
+    const table = await makeTable(cookie);
+
+    // Not a gap: a character without Lightning Reflexes has a bonus of zero, and
+    // that is an answer the file gives.
+    expect((await drop(cookie, table.campaign.id, character())).initiative).toBe(0);
   });
 
   test("but never over a number the form actually sent", async () => {
@@ -3287,9 +3345,10 @@ describe("a sheet that knows its own characteristics", () => {
     form.set("campaignId", table.campaign.id);
     form.set("kind", "npc");
     form.set("name", unique("Typed"));
-    form.set("sheet", new File([sheet()], "hero.html"));
-    // The dialog sends all eight, having read the sheet in the browser already.
-    // What arrives is what the game master saw and could have corrected.
+    form.set("sheet", character());
+    // The dialog sends all eight, having asked the server about the file as it
+    // was chosen. What arrives is what the game master saw and could have
+    // corrected.
     form.set("speed", "2");
     form.set("dexterity", "11");
 
@@ -3299,62 +3358,64 @@ describe("a sheet that knows its own characteristics", () => {
     )).json()).character;
 
     expect(created).toMatchObject({ speed: 2, dexterity: 11 });
-    // And the ones it did not send still come off the sheet.
-    expect(created).toMatchObject({ constitution: 10, recovery: 8, endurance: 30, stun: 31 });
+    // And the ones it did not send still come off the file.
+    expect(created).toMatchObject({ constitution: 10, recovery: 8, endurance: 30, stun: 33 });
   });
 
-  test("an unmarked sheet is left entirely alone", async () => {
+  test("a file that is not a character file is refused outright", async () => {
     const { cookie } = await signIn();
     const table = await makeTable(cookie);
 
-    // Anyone else's export. The ids in it could mean anything, so nothing is read.
-    const character = await drop(cookie, table.campaign.id, sheet({ marked: false }));
+    // Where an HTML sheet this app could not read was filed anyway and left the
+    // character at zero, a character file is read before it is kept — so this is
+    // said at the upload rather than discovered when someone opens the sheet.
+    const form = new FormData();
+    form.set("campaignId", table.campaign.id);
+    form.set("kind", "npc");
+    form.set("name", unique("Bogus"));
+    form.set("sheet", new File(["<html>not a character</html>"], "hero.hdc"));
+    const response = await fetch(
+      `${base}/api/characters`,
+      authed(cookie, { method: "POST", body: form }),
+    );
 
-    expect(character).toMatchObject({
-      speed: 0, dexterity: 0, constitution: 0, recovery: 0, endurance: 0, stun: 0,
-      body: 0, initiative: 0,
-    });
+    expect(response.status).toBe(400);
   });
 
   test("a characteristic outside what this app can store is dropped, not fatal", async () => {
     const { cookie } = await signIn();
     const table = await makeTable(cookie);
 
-    // SPD runs 0 to 12 here. A sheet claiming 40 must not put a character on the
+    // SPD runs 0 to 12 here. A file claiming 42 must not put a character on the
     // stage that no form could have produced — nor refuse the upload over a
     // characteristic this table may never look at.
-    const character = await drop(cookie, table.campaign.id, sheet({ speed: "40" }));
+    const filed = await drop(cookie, table.campaign.id, character({ speed: 40 }));
 
-    expect(character.speed).toBe(0);
-    expect(character.dexterity).toBe(23);
+    expect(filed.speed).toBe(0);
+    expect(filed.dexterity).toBe(23);
   });
 });
 
-describe("a sheet dropped over a character that already exists", () => {
-  /** An Ork HERO export carrying a portrait and the numbers a test asserts on. */
-  const sheet = (options: { dex: number; portrait?: boolean }) => {
-    // A believable PNG: real magic bytes, padded past the size a portrait scan
-    // dismisses as furniture.
-    const picture = new Uint8Array(4096);
-    picture.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-    const embedded = options.portrait
-      ? `<img src="data:image/png;base64,${Buffer.from(picture).toString("base64")}">`
-      : "";
-    return [
-      "<!--\n\nGenerated by Ork HERO Templates\n\n-->",
-      '<div id="characteristics-collapse"><table><tbody>',
-      `<tr><td><span class="primary">${options.dex}</span></td><td>DEX</td></tr>`,
-      "<tr><td>5</td><td>SPD</td></tr>",
-      "<tr><td>9</td><td>REC</td></tr>",
-      "</tbody></table></div>",
-      embedded,
-    ].join("\n");
+describe.skipIf(!rulesAvailable)("a character file dropped over a character that already exists", () => {
+  /** A believable PNG: real magic bytes, padded past what a scan calls furniture. */
+  const picture = () => {
+    const bytes = new Uint8Array(4096);
+    bytes.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    for (let i = 8; i < bytes.length; i += 1) bytes[i] = (i * 7) % 251;
+    return bytes;
   };
 
+  /** DEX levels of 4 print as 14 and 11 as 21; SPD and REC come with them. */
+  const character = (options: { dex: number; portrait?: boolean }) =>
+    hdcFile("Hero.hdc", {
+      characteristics: { DEX: options.dex, SPD: 3, REC: 5 },
+      ...(options.portrait ? { image: picture() } : {}),
+    });
+
   /** The update a drop sends: the file, and nothing else but the portrait rule. */
-  const redrop = async (cookie: string, characterId: string, html: string) => {
+  const redrop = async (cookie: string, characterId: string, file: File) => {
     const form = new FormData();
-    form.set("sheet", new File([html], "hero.html"));
+    form.set("sheet", file);
     form.set("portraitFromSheet", "true");
     const response = await fetch(
       `${base}/api/characters/${characterId}`,
@@ -3364,12 +3425,12 @@ describe("a sheet dropped over a character that already exists", () => {
     return (await response.json()).character;
   };
 
-  const create = async (cookie: string, campaignId: string, html: string) => {
+  const create = async (cookie: string, campaignId: string, file: File) => {
     const form = new FormData();
     form.set("campaignId", campaignId);
     form.set("kind", "npc");
     form.set("name", unique("Rewritten"));
-    form.set("sheet", new File([html], "hero.html"));
+    form.set("sheet", file);
     const response = await fetch(
       `${base}/api/characters`,
       authed(cookie, { method: "POST", body: form }),
@@ -3382,62 +3443,94 @@ describe("a sheet dropped over a character that already exists", () => {
     const { cookie } = await signIn();
     const table = await makeTable(cookie);
 
-    const character = await create(cookie, table.campaign.id, sheet({ dex: 14 }));
-    expect(character.dexterity).toBe(14);
+    const filed = await create(cookie, table.campaign.id, character({ dex: 4 }));
+    expect(filed.dexterity).toBe(14);
 
     // Without this the file would be replaced and the numbers left as they were —
-    // stale against the very sheet dropped to update them.
-    const updated = await redrop(cookie, character.id, sheet({ dex: 21 }));
-    expect(updated).toMatchObject({ dexterity: 21, speed: 5, recovery: 9 });
-    expect(updated.sheetUrl).toBe(character.sheetUrl);
+    // stale against the very file dropped to update them.
+    const updated = await redrop(cookie, filed.id, character({ dex: 11 }));
+    expect(updated).toMatchObject({ dexterity: 21, speed: 6, recovery: 9 });
+    expect(updated.sheetUrl).toBe(filed.sheetUrl);
   });
 
-  test("but a form that sends a number still outranks the sheet", async () => {
+  test("but a form that sends a number still outranks the file", async () => {
     const { cookie } = await signIn();
     const table = await makeTable(cookie);
-    const character = await create(cookie, table.campaign.id, sheet({ dex: 14 }));
+    const filed = await create(cookie, table.campaign.id, character({ dex: 4 }));
 
-    // The edit dialog sends all seven boxes, having read the sheet in the browser
-    // already, so what arrives is what the game master saw.
+    // The edit dialog sends all eight boxes, having asked the server about the
+    // file already, so what arrives is what the game master saw.
     const form = new FormData();
-    form.set("sheet", new File([sheet({ dex: 21 })], "hero.html"));
+    form.set("sheet", character({ dex: 11 }));
     form.set("dexterity", "3");
     const updated = (await (await fetch(
-      `${base}/api/characters/${character.id}`,
+      `${base}/api/characters/${filed.id}`,
       authed(cookie, { method: "PATCH", body: form }),
     )).json()).character;
 
     expect(updated.dexterity).toBe(3);
-    // And the ones it did not send still come off the sheet.
-    expect(updated.speed).toBe(5);
+    // And the ones it did not send still come off the file.
+    expect(updated.speed).toBe(6);
   });
 
   test("and its portrait replaces the picture that was there", async () => {
     const { cookie } = await signIn();
     const table = await makeTable(cookie);
 
-    const character = await create(cookie, table.campaign.id, sheet({ dex: 14, portrait: true }));
-    expect(character.cardUrl).not.toBeNull();
+    const filed = await create(cookie, table.campaign.id, character({ dex: 4, portrait: true }));
+    expect(filed.cardUrl).not.toBeNull();
 
-    const updated = await redrop(cookie, character.id, sheet({ dex: 14, portrait: true }));
+    const updated = await redrop(cookie, filed.id, character({ dex: 4, portrait: true }));
     expect(updated.cardUrl).not.toBeNull();
-    expect(updated.cardUrl).not.toBe(character.cardUrl);
+    expect(updated.cardUrl).not.toBe(filed.cardUrl);
   });
 
   test("where the edit dialog leaves a chosen picture alone", async () => {
     const { cookie } = await signIn();
     const table = await makeTable(cookie);
-    const character = await create(cookie, table.campaign.id, sheet({ dex: 14, portrait: true }));
+    const filed = await create(cookie, table.campaign.id, character({ dex: 4, portrait: true }));
 
     // The same upload without the flag, which is what the dialog sends: a picture
     // the game master chose is not for a file to overrule.
     const form = new FormData();
-    form.set("sheet", new File([sheet({ dex: 14, portrait: true })], "hero.html"));
+    form.set("sheet", character({ dex: 4, portrait: true }));
     const updated = (await (await fetch(
-      `${base}/api/characters/${character.id}`,
+      `${base}/api/characters/${filed.id}`,
       authed(cookie, { method: "PATCH", body: form }),
     )).json()).character;
 
-    expect(updated.cardUrl).toBe(character.cardUrl);
+    expect(updated.cardUrl).toBe(filed.cardUrl);
+  });
+
+  test("and a portrait the browser sent alongside is not a picture the game master chose", async () => {
+    const { cookie } = await signIn();
+    const table = await makeTable(cookie);
+    const filed = await create(cookie, table.campaign.id, character({ dex: 4, portrait: true }));
+    expect(filed.cardUrl).not.toBeNull();
+
+    // The browser splits the picture out before uploading, so it arrives as its
+    // own part. Sent as `card` it would mean "the game master picked this" and
+    // would overrule the picture already there; as `sheetPortrait` it means what
+    // it is, and the existing card stands.
+    const form = new FormData();
+    form.set("sheet", character({ dex: 4 }));
+    form.set("sheetPortrait", new File([picture() as BlobPart], "portrait.png"));
+    const updated = (await (await fetch(
+      `${base}/api/characters/${filed.id}`,
+      authed(cookie, { method: "PATCH", body: form }),
+    )).json()).character;
+
+    expect(updated.cardUrl).toBe(filed.cardUrl);
+    // And it is taken when there is nothing to lose.
+    const bare = await create(cookie, table.campaign.id, character({ dex: 4 }));
+    expect(bare.cardUrl).toBeNull();
+    const second = new FormData();
+    second.set("sheet", character({ dex: 4 }));
+    second.set("sheetPortrait", new File([picture() as BlobPart], "portrait.png"));
+    const gained = (await (await fetch(
+      `${base}/api/characters/${bare.id}`,
+      authed(cookie, { method: "PATCH", body: second }),
+    )).json()).character;
+    expect(gained.cardUrl).not.toBeNull();
   });
 });

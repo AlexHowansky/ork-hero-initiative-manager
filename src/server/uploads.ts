@@ -1,15 +1,18 @@
 /**
  * Upload intake.
  *
- * Two kinds of file arrive: character sheets (HTML) and card images.
+ * Two kinds of file arrive: HERO Designer character files (`.hdc`) and card
+ * images.
  *
- * Sheets keep whatever JavaScript the game master authored — a sheet with dice
- * buttons or auto-calculating fields is expected to keep working — so they are
- * treated as untrusted code from this point on. Nothing here tries to sanitise
- * them; the isolation happens at delivery time in routes/files.ts, which drops
- * them into an opaque origin where they can't reach the app. The one edit a sheet
- * ever receives is `removeRun`, which takes back out the portrait that has just
- * become the character's card rather than storing that picture twice.
+ * A character file is data, not a document. Nothing in it is ever executed, and
+ * the sheet a game master looks at is rendered from it on demand
+ * (`hero-sheet.ts`) rather than stored — so what routes/files.ts serves is
+ * output this app generated, delivered into an opaque origin all the same,
+ * because the character's own notes fields can carry CSS the game master wrote.
+ *
+ * The one edit a stored character file ever receives is `removeImage`, which
+ * takes back out the portrait that has just become the character's card rather
+ * than storing that picture twice.
  *
  * What this module does guarantee: files land outside any statically served
  * directory, under a random name that never derives from user input, with a size
@@ -23,7 +26,7 @@ import { config, limits } from "../lib/config.ts";
 import { errors } from "../lib/errors.ts";
 import { log } from "../lib/log.ts";
 import { newId } from "../lib/ids.ts";
-import { statsFromSheetHtml } from "../lib/sheet-stats.ts";
+import { HDC_MIME, imageFromHdc, parseHdc, statsFromHdc, withoutImage } from "./hero-sheet.ts";
 import type { HeroStatField } from "../lib/hero.ts";
 import { uploads } from "../db/queries.ts";
 import type { UploadRow } from "../db/types.ts";
@@ -137,6 +140,17 @@ async function readWithLimit(file: File, maxBytes: number, label: string): Promi
 }
 
 /**
+ * An uploaded file's bytes, held to the same ceiling a stored one is.
+ *
+ * For the one route that reads a file without keeping it: the dialog sends a
+ * character file to be told what its characteristics are, and nothing about it
+ * is written down.
+ */
+export async function readUploadedFile(file: File, label: string): Promise<Uint8Array> {
+  return await readWithLimit(file, limits.uploadBytes, label);
+}
+
+/**
  * Holds a submission carrying more than one file to the same ceiling the files
  * are held to individually.
  *
@@ -161,15 +175,25 @@ export function requireTotalWithinLimit(...files: (File | null)[]): void {
   }
 }
 
-/** Stores an uploaded character sheet. */
+/**
+ * Stores an uploaded character file.
+ *
+ * Parsed before it is written, which is new: an HTML sheet was stored whatever
+ * it turned out to contain, because it was a document to be handed back as it
+ * arrived. A character file is read by this app every time anybody looks at the
+ * character, so a file that cannot be read is a character that cannot be
+ * displayed — and the moment to say so is while the game master still has the
+ * upload dialog open, not the first time they click a name mid-fight.
+ */
 export async function storeSheet(file: File): Promise<UploadRow> {
-  const name = file.name ?? "sheet.html";
-  if (!/\.x?html?$/i.test(name)) {
-    throw errors.badRequest("Character sheets must be .html files.");
+  const name = file.name ?? "character.hdc";
+  if (!/\.hdc$/i.test(name)) {
+    throw errors.badRequest("Character files must be .hdc files exported from HERO Designer.");
   }
-  const bytes = await readWithLimit(file, limits.uploadBytes, "character sheet");
-  if (bytes.byteLength === 0) throw errors.badRequest("That character sheet file was empty.");
-  return await persist(bytes, SHEET_DIR, "sheet", "text/html", name);
+  const bytes = await readWithLimit(file, limits.uploadBytes, "character file");
+  if (bytes.byteLength === 0) throw errors.badRequest("That character file was empty.");
+  parseHdc(bytes, name);
+  return await persist(bytes, SHEET_DIR, "sheet", HDC_MIME, name);
 }
 
 /**
@@ -282,78 +306,19 @@ export async function storeImage(file: File): Promise<UploadRow> {
 
 /* ---------------------------------------------------------------- portraits */
 
-/** Images below this are furniture — dice icons, rules, logos — not a portrait. */
+/** Images below this are furniture — an icon or a placeholder, not a portrait. */
 const MIN_PORTRAIT_BYTES = 2 * 1024;
 
-/** Bounds the work a sheet full of long encoded strings can ask for. */
-const MAX_CANDIDATES = 50;
-
-/** Enough of the front of a candidate to recognise an image by, in characters. */
-const PREFIX_CHARS = 32;
-
 /**
- * The two ways an image is found sitting inside an HTML file.
+ * The characteristics a stored character file already knows, or nothing.
  *
- * Base64 covers the ordinary case: a browser saving a page writes the picture
- * into the markup as a `data:` URI, and the payload of one is simply a long
- * base64 run. Hex covers sheets whose generator hides the picture in a script
- * variable and assembles the `data:` URI at load time — the image is just as
- * embedded, but there is no `data:` prefix in the file to look for.
+ * The file is on disk by the time this runs, so it is re-read rather than kept
+ * in hand. What it says is worked out by `hero-sheet.ts`, against the game
+ * system's rules — the same answer the dialog got from `/api/characters/stats`
+ * as the file was chosen, so the two cannot disagree. This one is for the
+ * characters filed by dropping a folder of them, which send no boxes at all.
  *
- * Neither pattern looks for any surrounding syntax, because there is no agreeing
- * on it: the same picture turns up in an `img` tag, in a CSS `url()`, and in a
- * string a script later assigns to `.src`. What identifies an image here is what
- * identifies every other upload — the bytes it starts with.
- */
-const ENCODINGS = [
-  {
-    // Four characters carry three bytes.
-    pattern: new RegExp(`[A-Za-z0-9+/]{${Math.ceil((MIN_PORTRAIT_BYTES * 4) / 3)},}={0,2}`, "g"),
-    size: (run: string) => (run.length / 4) * 3,
-    decode: (run: string) => Uint8Array.from(atob(run), (character) => character.charCodeAt(0)),
-  },
-  {
-    // Two characters carry one byte.
-    pattern: new RegExp(`[0-9a-fA-F]{${MIN_PORTRAIT_BYTES * 2},}`, "g"),
-    size: (run: string) => run.length / 2,
-    decode: (run: string) => {
-      // An odd trailing character would be half a byte; drop it rather than
-      // letting the decoder guess.
-      const even = run.length % 2 === 0 ? run : run.slice(0, -1);
-      return new Uint8Array(Buffer.from(even, "hex"));
-    },
-  },
-] as const;
-
-/**
- * The portrait embedded in a character sheet, if it has one.
- *
- * Sheets are usually saved as a single self-contained file, so the character's
- * picture is already inside the HTML — as a `data:` URI, or as a hex or base64
- * string a script turns into one. Taking it saves the game master finding and
- * uploading the same image a second time.
- *
- * The biggest embedded image wins. There is no markup convention for "this one
- * is the portrait" — the attributes vary by whoever authored the sheet — but a
- * portrait is reliably larger than the icons and rules diagrams around it, and
- * anything too small to be one is skipped outright.
- *
- * Only what is embedded is considered. A sheet that links a picture by URL is
- * left alone on purpose: fetching it would have the server make a request to
- * wherever an uploaded file says to, which is how an upload form becomes a way
- * to reach things only the server can see. A relative `src` has nothing to
- * resolve against in the first place, since a sheet is stored as one file.
- */
-/**
- * The characteristics a stored sheet already knows, or nothing.
- *
- * The counterpart to `portraitFromSheet` above, and read the same way: the file
- * is on disk by the time this runs, so it is re-read rather than kept in hand.
- * What it says is decided by `lib/sheet-stats.ts`, which the browser uses too —
- * the dialog fills its own boxes as a sheet is chosen, and this is for the
- * characters filed by dropping a folder of sheets, which send no boxes at all.
- *
- * A sheet that cannot be read is not an error worth failing an upload over: the
+ * A file that cannot be read is not an error worth failing an upload over: the
  * character is filed with whatever the form did say, exactly as before any of
  * this existed.
  */
@@ -361,9 +326,10 @@ export async function statsFromSheet(
   sheet: UploadRow,
 ): Promise<Partial<Record<HeroStatField, number>>> {
   try {
-    return statsFromSheetHtml(await Bun.file(uploadPath(sheet)).text());
+    const bytes = new Uint8Array(await Bun.file(uploadPath(sheet)).arrayBuffer());
+    return await statsFromHdc(bytes, sheet.original_name);
   } catch (error) {
-    log.warn("could not re-read sheet to look for characteristics", {
+    log.warn("could not re-read a character file to look for characteristics", {
       uploadId: sheet.id,
       error,
     });
@@ -371,113 +337,101 @@ export async function statsFromSheet(
   }
 }
 
+/**
+ * The portrait inside a stored character file, if it has one.
+ *
+ * HERO Designer keeps the character's picture in the file, as base64 in a single
+ * `IMAGE` element, so taking it saves the game master finding and uploading the
+ * same image a second time.
+ *
+ * There is exactly one place to look and one picture to find, which is the whole
+ * of the difference from the HTML sheets this replaces: those had to be scanned
+ * for long runs of base64 or hex that decoded to something with image magic
+ * bytes, with the largest one assumed to be the portrait, because no markup
+ * convention said which image was which. What has not changed is that only what
+ * is *embedded* counts — a file naming a picture by URL is left alone, since
+ * fetching it would have the server make a request to wherever an uploaded file
+ * says to.
+ *
+ * Ordinarily there is nothing here to find: the browser splits the picture out
+ * before uploading (`client/hdc.ts`), so the file arrives with no image and the
+ * portrait arrives beside it, already sized. This is the path for a file that
+ * reaches the server whole — through the API, or from a browser where the split
+ * failed — and it is what makes the server, not the client, the authority on
+ * what a character's picture is.
+ */
 export async function portraitFromSheet(sheet: UploadRow): Promise<UploadRow | null> {
-  let html: string;
+  let bytes: Uint8Array;
   try {
-    html = await Bun.file(uploadPath(sheet)).text();
+    bytes = new Uint8Array(await Bun.file(uploadPath(sheet)).arrayBuffer());
   } catch (error) {
-    log.warn("could not re-read sheet to look for a portrait", { uploadId: sheet.id, error });
+    log.warn("could not re-read a character file to look for a portrait", {
+      uploadId: sheet.id,
+      error,
+    });
     return null;
   }
 
-  let best: { bytes: Uint8Array; mime: string; run: string } | null = null;
+  const picture = imageFromHdc(parseHdc(bytes, sheet.original_name));
+  if (!picture || picture.byteLength < MIN_PORTRAIT_BYTES) return null;
 
-  for (const encoding of ENCODINGS) {
-    let seen = 0;
-
-    for (const match of html.matchAll(encoding.pattern)) {
-      if (seen >= MAX_CANDIDATES) break;
-      seen += 1;
-
-      const run = match[0];
-      const size = encoding.size(run);
-
-      // Both ends first, on the length alone: nothing is decoded to find out
-      // that it is a thumbnail, or larger than an upload may be. A sheet cannot
-      // in fact hold one that large — it is held to the same ceiling, and
-      // encoding costs at least a third again — but the check is cheap and says
-      // plainly what the range of interest is.
-      if (size < MIN_PORTRAIT_BYTES || size > limits.uploadBytes) continue;
-      // Nor is anything decoded that cannot beat what we already have.
-      if (best && size <= best.bytes.byteLength) continue;
-
-      // Most long runs in a sheet are minified script, a hash, or an embedded
-      // font. Decoding the first few bytes settles what this one is before
-      // megabytes of it are decoded.
-      let bytes: Uint8Array;
-      try {
-        if (!detectImageMime(encoding.decode(run.slice(0, PREFIX_CHARS)))) continue;
-        bytes = encoding.decode(run);
-      } catch {
-        continue; // Not the encoding it looked like.
-      }
-
-      const mime = detectImageMime(bytes);
-      if (!mime || bytes.byteLength < MIN_PORTRAIT_BYTES) continue;
-      if (best && bytes.byteLength <= best.bytes.byteLength) continue;
-
-      best = { bytes, mime, run };
-    }
+  const mime = detectImageMime(picture);
+  if (!mime) {
+    log.warn("a character file's picture was not an image this app can store", {
+      uploadId: sheet.id,
+    });
+    return null;
   }
 
-  if (!best) return null;
-
-  const extension = best.mime.replace("image/", "").replace("jpeg", "jpg");
-  log.info("portrait taken from a sheet", {
+  const extension = mime.replace("image/", "").replace("jpeg", "jpg");
+  log.info("portrait taken from a character file", {
     uploadId: sheet.id,
-    mime: best.mime,
-    bytes: best.bytes.byteLength,
+    mime,
+    bytes: picture.byteLength,
   });
-  // Scaled on the way in like any other picture: a sheet's portrait is often the
-  // largest image the app ever sees.
-  const portrait = await persistImage(best.bytes, `portrait.${extension}`);
-  if (portrait) await removeRun(sheet, best.run);
+  // Scaled on the way in like any other picture: a character file's portrait is
+  // often the largest image this app ever sees.
+  const portrait = await persistImage(picture, `portrait.${extension}`);
+  if (portrait) await removeImage(sheet);
   return portrait;
 }
 
 /**
- * Takes the portrait's own bytes back out of the sheet that carried it.
+ * Takes the portrait's own bytes back out of the file that carried them.
  *
- * Once the picture is a card of its own, the copy inside the HTML is the same
- * image stored twice — and it is the larger copy, since a card is fitted on the
- * way in while a sheet carries whatever was pasted into it. It is also the bulk
- * of what a sheet weighs: the sheets in one library ran to 18 MB, almost all of
- * it embedded portraits, and one 985 KB sheet came out at 52 KB.
+ * Once the picture is a card of its own, the copy inside the character file is
+ * the same image stored twice — and much the larger copy, since base64 in UTF-16
+ * costs nearly three bytes for every one of the picture's. It is almost the
+ * whole of what one of these files weighs: the fixture is 3.7 MB, of which
+ * 3.63 MB is a 1.3 MB portrait, and it comes out at 92 KB.
  *
- * Only the run that was decoded goes, and it is replaced with nothing rather
- * than with a stand-in. This module never looks at the syntax around a run —
- * that is what lets it find a picture in an `img` tag, a CSS `url()` and a
- * script variable alike — so what is left behind is an empty `data:` URI in the
- * first case and an empty string literal in the last. Both are still the
- * document the game master wrote, minus one picture; neither is markup this had
- * to understand to produce.
+ * Which means a rendered sheet no longer shows a portrait. That is the trade
+ * this makes, and the same one the HTML sheets made: the picture is on the card,
+ * which is where this app shows it.
  *
- * Which means a sheet that drew its own portrait no longer draws one. That is
- * the trade this makes: the picture is on the card, which is where the app shows
- * it, and the sheet is the sheet rather than a second copy of the image.
- *
- * Every copy of the run goes, since a sheet that pasted its portrait twice is
- * carrying it twice. A sheet that cannot be rewritten is left exactly as it was
- * and the portrait still stands: the picture is the point, and what the sheet
- * saves is the bonus.
+ * A file that cannot be rewritten is left exactly as it was and the portrait
+ * still stands: the picture is the point, and what the file saves is the bonus.
  */
-async function removeRun(sheet: UploadRow, run: string): Promise<void> {
+async function removeImage(sheet: UploadRow): Promise<void> {
   try {
-    const html = await Bun.file(uploadPath(sheet)).text();
-    const trimmed = html.replaceAll(run, "");
-    if (trimmed === html) return;
+    const path = uploadPath(sheet);
+    const before = new Uint8Array(await Bun.file(path).arrayBuffer());
+    const bytes = withoutImage(before);
+    if (bytes.byteLength === before.byteLength) return;
 
-    const bytes = new TextEncoder().encode(trimmed);
-    await Bun.write(uploadPath(sheet), bytes);
+    await Bun.write(path, bytes);
     // The row describes the file, so what the file now weighs and hashes to has
     // to travel with it — `db:gc` and the duplicate check both read those.
     uploads.rewrite(sheet.id, { byteSize: bytes.byteLength, sha256: sha256(bytes) });
-    log.info("portrait removed from the sheet that carried it", {
+    log.info("portrait removed from the character file that carried it", {
       uploadId: sheet.id,
-      bytes: `${html.length} -> ${bytes.byteLength}`,
+      bytes: `${before.byteLength} -> ${bytes.byteLength}`,
     });
   } catch (error) {
-    log.warn("could not take the portrait out of the sheet", { uploadId: sheet.id, error });
+    log.warn("could not take the portrait out of the character file", {
+      uploadId: sheet.id,
+      error,
+    });
   }
 }
 

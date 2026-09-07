@@ -52,7 +52,9 @@ document explains the requirements that must be adhered to.
   that size would not fit the column at all. Changing the size re-fits every
   panel measured in cards, at once.
 
-* A character sheet is shown as it was written: it opens over the page in the
+* A character sheet is rendered from the character's file each time it is opened
+  and is never stored, so a re-exported character has a current sheet with
+  nothing else to do. It opens over the page in the
   window's own aspect ratio, with nothing drawn around it — no title, no border,
   no margin — save the control that closes it. How much of the window it takes is
   a deployment setting; by default it is most of it, leaving the page dimmed
@@ -203,21 +205,24 @@ The app should have the following features:
   library as cards.
 
 * A game master may add, edit, and delete PCs and NPCs. These are represented by
-  HTML file uploads. Each PC and NPC must be categorized into one campaign. Each
+  HERO Designer character file (`.hdc`) uploads, from which the app draws both
+  the character's sheet and the characteristics it tracks. Each PC and NPC must be categorized into one campaign. Each
   PC and NPC may have a card image. Either file may be chosen with the file
-  picker or dropped onto its field; sheets may also be dropped anywhere on the
+  picker or dropped onto its field; character files may also be dropped anywhere on the
   character panel, which files each of them as a PC of the selected campaign at
   once, without a dialog, named after its file; and an image may be
   dropped straight onto a card — a campaign's or a character's — which becomes
   that card's picture at once, without a dialog. The add and edit form
-  asks for the sheet first, then the name, the type, the campaign, and the image. Uploading a sheet
+  asks for the character file first, then the name, the type, the campaign, and the image. Uploading one
   fills the name in from the file's name, minus its extension, unless the game
-  master has typed a name of their own. Pictures — a campaign's, a character's,
-  and one found inside a sheet alike — are scaled down on the way in to the size
-  the cards show them at, in proportion and without cropping. An uploaded sheet
-  is also scanned for a portrait: if it carries one, and the character has no picture of its own, that
-  becomes the character's image, and that picture's bytes are removed from the
-  stored sheet, since the card is now the copy that is kept. A picture the game
+  master has typed a name of their own, and fills the characteristics in from
+  what the file says, which the game master may still correct before saving.
+  Pictures — a campaign's, a character's, and one found inside a character file
+  alike — are scaled down on the way in to the size the cards show them at, in
+  proportion and without cropping. A character file carries the character's
+  portrait: if it has one, and the character has no picture of its own, that
+  becomes the character's image, and the picture is removed from the stored file,
+  since the card is now the copy that is kept. A picture the game
   master chose is never replaced by one found in a file. Both edit forms offer `Remove the current card
   image` when there is one, which empties the picture; uploading an image in the
   same submission wins over ticking it. Present the character library as cards,

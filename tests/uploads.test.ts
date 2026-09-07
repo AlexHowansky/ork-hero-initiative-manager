@@ -1,10 +1,10 @@
 /**
  * Upload intake.
  *
- * Sheets deliberately keep their scripts — the isolation is applied when they are
- * served, not by rewriting them — so what matters here is that a file is checked
- * by its content, capped in size, and stored under a name that cannot be steered
- * by whoever uploaded it.
+ * What matters here is that a file is checked by its content, capped in size,
+ * and stored under a name that cannot be steered by whoever uploaded it — and
+ * that a character file is readable before it is kept, since this app has to
+ * read it again every time anyone looks at the character.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -23,6 +23,8 @@ import {
 } from "../src/server/uploads.ts";
 import { limits } from "../src/lib/config.ts";
 import { uploads } from "../src/db/queries.ts";
+import { parseHdc } from "../src/server/hero-sheet.ts";
+import { hdcBytes, hdcFile } from "./helpers.ts";
 
 const PNG = new Uint8Array([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
@@ -33,18 +35,18 @@ function file(name: string, contents: Uint8Array | string, type = ""): File {
   return new File([contents as BlobPart], name, { type });
 }
 
-describe("character sheets", () => {
-  test("are stored intact, scripts and all", async () => {
-    const html = "<html><body><script>alert(1)</script><h1>Hero</h1></body></html>";
-    const upload = await storeSheet(file("hero.html", html));
+describe("character files", () => {
+  test("are stored exactly as they arrived", async () => {
+    const bytes = hdcBytes({ name: "Hero", characteristics: { SPD: 2 } });
+    const upload = await storeSheet(new File([bytes as BlobPart], "hero.hdc"));
 
-    // Nothing is stripped: an interactive sheet has to keep working.
-    expect(await Bun.file(uploadPath(upload)).text()).toBe(html);
-    expect(upload.mime).toBe("text/html");
+    const stored = new Uint8Array(await Bun.file(uploadPath(upload)).arrayBuffer());
+    expect([...stored]).toEqual([...bytes]);
+    expect(upload.mime).toBe("application/x-hero-designer-character");
   });
 
   test("get a generated name on disk, never the uploaded one", async () => {
-    const upload = await storeSheet(file("../../etc/passwd.html", "<p>x</p>"));
+    const upload = await storeSheet(hdcFile("../../etc/passwd.hdc"));
 
     // The uploaded name is kept only as metadata, and sanitised even there.
     expect(basename(upload.disk_path)).not.toContain("passwd");
@@ -53,36 +55,40 @@ describe("character sheets", () => {
   });
 
   test("are named on disk after the row that describes them", async () => {
-    const upload = await storeSheet(file("hero.html", "<p>x</p>"));
+    const upload = await storeSheet(hdcFile());
 
     // One identifier, not two: a stray file names its own row, and a log line
     // carrying both cannot read as the same id mistyped.
     expect(basename(upload.disk_path)).toBe(upload.id);
   });
 
-  test("must actually be HTML by extension", async () => {
-    await expect(storeSheet(file("sheet.exe", "<p>x</p>"))).rejects.toThrow(
-      "Character sheets must be .html files.",
+  test("must be a .hdc by extension", async () => {
+    await expect(storeSheet(file("sheet.html", "<p>x</p>"))).rejects.toThrow(
+      "Character files must be .hdc files exported from HERO Designer.",
     );
-    await expect(storeSheet(file("sheet.php", "<p>x</p>"))).rejects.toThrow(
-      "Character sheets must be .html files.",
-    );
-    // .htm and .xhtml are legitimate.
-    await expect(storeSheet(file("sheet.htm", "<p>x</p>"))).resolves.toBeDefined();
+    await expect(storeSheet(file("sheet.exe", "x"))).rejects.toThrow(/\.hdc/);
+  });
+
+  test("must actually be a character file, not merely named like one", async () => {
+    // The extension is the claim; parsing it is the check. A file kept without
+    // this is a character whose sheet fails to open later, in front of a table.
+    await expect(storeSheet(file("hero.hdc", "<html><body>not a character</body></html>")))
+      .rejects.toThrow(/CHARACTER/i);
   });
 
   test("cannot be empty", async () => {
-    await expect(storeSheet(file("sheet.html", ""))).rejects.toThrow("empty");
+    await expect(storeSheet(file("hero.hdc", ""))).rejects.toThrow("empty");
   });
 
   test("are capped in size", async () => {
     const tooBig = "x".repeat(limits.uploadBytes + 1);
-    await expect(storeSheet(file("big.html", tooBig))).rejects.toThrow(/limit/i);
+    await expect(storeSheet(file("big.hdc", tooBig))).rejects.toThrow(/limit/i);
   });
 
   test("record a hash of what was stored", async () => {
-    const upload = await storeSheet(file("sheet.html", "<p>same</p>"));
-    const again = await storeSheet(file("other.html", "<p>same</p>"));
+    const bytes = hdcBytes({ name: "Same" });
+    const upload = await storeSheet(new File([bytes as BlobPart], "one.hdc"));
+    const again = await storeSheet(new File([bytes as BlobPart], "two.hdc"));
     // Identical content hashes identically, which makes duplicates identifiable.
     expect(upload.sha256).toBe(again.sha256);
     expect(upload.sha256).toMatch(/^[0-9a-f]{64}$/);
@@ -111,7 +117,7 @@ describe("card images", () => {
 
 describe("a submission carrying more than one file", () => {
   /** Just over half the limit: one fits, two do not. */
-  const half = () => file("half.html", "x".repeat(Math.floor(limits.uploadBytes / 2) + 1024));
+  const half = () => file("half.hdc", "x".repeat(Math.floor(limits.uploadBytes / 2) + 1024));
 
   test("is measured as a whole", () => {
     expect(() => requireTotalWithinLimit(half(), half())).toThrow(/together/i);
@@ -123,7 +129,7 @@ describe("a submission carrying more than one file", () => {
   });
 });
 
-describe("the portrait inside a sheet", () => {
+describe("the portrait inside a character file", () => {
   /** A believable image: real magic bytes, padded to a believable size. */
   function image(signature: Uint8Array, bytes: number): Uint8Array {
     const data = new Uint8Array(bytes);
@@ -133,178 +139,72 @@ describe("the portrait inside a sheet", () => {
     return data;
   }
 
-  const embed = (data: Uint8Array, mime = "image/png") =>
-    `data:${mime};base64,${Buffer.from(data).toString("base64")}`;
+  const fileWith = async (options: Parameters<typeof hdcBytes>[0]) =>
+    await storeSheet(hdcFile("Hero.hdc", options));
 
-  const sheetWith = async (body: string) => await storeSheet(file("sheet.html", body));
-
-  test("is lifted out of a self-contained sheet", async () => {
+  test("is lifted out of the file that carried it", async () => {
     const portrait = image(PNG, 4096);
-    const sheet = await sheetWith(
-      `<h1>Hero</h1><img alt="portrait" src="${embed(portrait)}"><p>Strength 18</p>`,
-    );
+    const sheet = await fileWith({ name: "Hero", image: portrait });
 
     const found = await portraitFromSheet(sheet);
     expect(found?.mime).toBe("image/png");
     expect(found?.kind).toBe("image");
 
-    // Byte for byte what the sheet carried, not a re-encoding of it.
+    // Byte for byte what the file carried, not a re-encoding of it. The base64
+    // in a real file is wrapped and indented, so this is also the check that the
+    // whitespace never reaches the decoder.
     const stored = new Uint8Array(await Bun.file(uploadPath(found!)).arrayBuffer());
     expect([...stored]).toEqual([...portrait]);
   });
 
-  test("is taken out of the sheet once it is a card of its own", async () => {
+  test("is taken out of the file once it is a card of its own", async () => {
     const portrait = image(PNG, 4096);
-    const encoded = Buffer.from(portrait).toString("base64");
-    const sheet = await sheetWith(
-      `<h1>Hero</h1><img alt="portrait" src="${embed(portrait)}"><p>Strength 18</p>`,
-    );
+    const sheet = await fileWith({ name: "Hero", image: portrait });
     const before = sheet.byte_size;
 
     expect(await portraitFromSheet(sheet)).not.toBeNull();
 
-    // The picture's own bytes are gone; everything the game master wrote around
-    // them is untouched, the emptied `src` included.
-    const html = await Bun.file(uploadPath(sheet)).text();
-    expect(html).not.toContain(encoded);
-    expect(html).toContain("<h1>Hero</h1>");
-    expect(html).toContain("<p>Strength 18</p>");
-    expect(html).toContain('<img alt="portrait" src="data:image/png;base64,">');
+    // The picture is gone and the character is not: what is left still parses,
+    // and still says everything about the character it said before.
+    const stored = new Uint8Array(await Bun.file(uploadPath(sheet)).arrayBuffer());
+    const character = parseHdc(stored);
+    expect(character.image).toBeUndefined();
+    expect(character.info.characterName).toBe("Hero");
 
     // And the row still describes the file it points at.
     const row = uploads.byId(sheet.id)!;
-    const stored = new Uint8Array(await Bun.file(uploadPath(sheet)).arrayBuffer());
     expect(row.byte_size).toBe(stored.byteLength);
     expect(row.byte_size).toBeLessThan(before);
     expect(row.sha256).toBe(new Bun.CryptoHasher("sha256").update(stored).digest("hex"));
   });
 
-  test("a run a script decodes itself is emptied, and nothing is written in its place", async () => {
-    // The Hero Designer export's shape: the picture is hex in a variable, and a
-    // handler builds the `data:` URI from it once the page is parsed. Nothing is
-    // put in the variable's place — a URL there would be decoded as though it
-    // were the picture — so the sheet simply stops drawing a portrait.
-    const portrait = image(PNG, 4096);
-    const hex = Buffer.from(portrait).toString("hex");
-    const sheet = await sheetWith(`
-      <img id="portrait-image">
-      <script>
-        const imageHex = '${hex}';
-        document.addEventListener('DOMContentLoaded', () => {
-          document.getElementById('portrait-image').src = 'data:image/png;base64,' + imageHex;
-        });
-      </script>
-    `);
-
-    expect(await portraitFromSheet(sheet)).not.toBeNull();
-
-    const html = await Bun.file(uploadPath(sheet)).text();
-    expect(html).not.toContain(hex);
-    expect(html).toContain("const imageHex = '';");
-    // The sheet is never pointed at the card, and nothing is appended to it.
-    expect(html).not.toContain("/uploads/images/");
-    expect(html.trimEnd()).toEndWith("</script>");
-  });
-
-  test("leaves a sheet it found nothing in exactly as it arrived", async () => {
-    const body = "<h1>Hero</h1><p>No pictures here.</p>";
-    const sheet = await sheetWith(body);
+  test("leaves a file it found nothing in exactly as it arrived", async () => {
+    const bytes = hdcBytes({ name: "Plain" });
+    const sheet = await storeSheet(new File([bytes as BlobPart], "Plain.hdc"));
 
     expect(await portraitFromSheet(sheet)).toBeNull();
-    expect(await Bun.file(uploadPath(sheet)).text()).toBe(body);
+    const stored = new Uint8Array(await Bun.file(uploadPath(sheet)).arrayBuffer());
+    expect([...stored]).toEqual([...bytes]);
     expect(uploads.byId(sheet.id)!.byte_size).toBe(sheet.byte_size);
   });
 
-  test("only the picture that was taken goes; smaller ones stay", async () => {
-    const icon = image(GIF, 3000);
-    const face = image(PNG, 9000);
-    const sheet = await sheetWith(
-      `<img src="${embed(icon, "image/gif")}"><img src="${embed(face)}">`,
-    );
-
-    expect(await portraitFromSheet(sheet)).not.toBeNull();
-
-    const html = await Bun.file(uploadPath(sheet)).text();
-    expect(html).not.toContain(Buffer.from(face).toString("base64"));
-    // The dice icon is still furniture the sheet needs to draw itself.
-    expect(html).toContain(Buffer.from(icon).toString("base64"));
+  test("is identified by its content, not by what the file calls it", async () => {
+    // The element says PNG; the bytes are a GIF, and the bytes decide — the same
+    // rule every other image upload is held to.
+    const sheet = await fileWith({ image: image(GIF, 5000), imageName: "portrait.png" });
+    expect((await portraitFromSheet(sheet))?.mime).toBe("image/gif");
   });
 
-  test("is the largest picture, whatever it is embedded in", async () => {
-    const icon = image(PNG, 3000);
-    const face = image(GIF, 9000);
-    const sheet = await sheetWith(`
-      <style>.d20 { background-image: url(${embed(icon)}); }</style>
-      <img src="${embed(face, "image/gif")}">
-    `);
-
-    const found = await portraitFromSheet(sheet);
-    expect(found?.mime).toBe("image/gif");
-    expect((await Bun.file(uploadPath(found!)).arrayBuffer()).byteLength).toBe(9000);
-  });
-
-  test("is found where a script hid it, rather than only in a data URI", async () => {
-    // What a real sheet does: the picture is a hex string in a variable, and the
-    // `data:` URI is built at load time, so there is no `data:` in the file.
-    const portrait = image(PNG, 6000);
-    const hex = Buffer.from(portrait).toString("hex");
-    const sheet = await sheetWith(`
-      <img id="portrait-image" title="Redshift">
-      <script>
-        const imageName = 'redshift small.png';
-        const imageHex = '${hex}';
-        document.getElementById('portrait-image').src =
-          'data:image/png;base64,' + btoa(fromHex(imageHex));
-      </script>
-    `);
-
-    const found = await portraitFromSheet(sheet);
-    expect(found?.mime).toBe("image/png");
-    const stored = new Uint8Array(await Bun.file(uploadPath(found!)).arrayBuffer());
-    expect([...stored]).toEqual([...portrait]);
-  });
-
-  test("is found where a script hid it as base64, without a data URI either", async () => {
-    const portrait = image(GIF, 5000);
-    const sheet = await sheetWith(
-      `<script>const portrait = "${Buffer.from(portrait).toString("base64")}";</script>`,
-    );
-
-    const found = await portraitFromSheet(sheet);
-    expect(found?.mime).toBe("image/gif");
-  });
-
-  test("is not a long string that merely looks like one", async () => {
-    // A hash, a minified bundle, an embedded font: long runs of exactly these
-    // characters are everywhere in a sheet, and none of them start like an image.
-    const sheet = await sheetWith(`
-      <script>const key = '${"deadbeef".repeat(2000)}';</script>
-      <script>const blob = '${Buffer.from("x".repeat(9000)).toString("base64")}';</script>
-    `);
+  test("is not taken when it is too small to be a portrait", async () => {
+    const sheet = await fileWith({ image: image(PNG, 900) });
     expect(await portraitFromSheet(sheet)).toBeNull();
+    // And nothing was rewritten in the attempt.
+    expect(uploads.byId(sheet.id)!.byte_size).toBe(sheet.byte_size);
   });
 
-  test("is not a dice icon or a rules diagram", async () => {
-    const sheet = await sheetWith(`<img src="${embed(image(PNG, 900))}">`);
-    expect(await portraitFromSheet(sheet)).toBeNull();
-  });
-
-  test("is nothing at all when the sheet has no pictures", async () => {
-    expect(await portraitFromSheet(await sheetWith("<h1>Hero</h1>"))).toBeNull();
-  });
-
-  test("is never fetched from a URL the sheet names", async () => {
-    // Following this would let an uploaded file steer a request from the server,
-    // which is the whole of SSRF. A linked picture is simply not taken.
-    const sheet = await sheetWith(
-      '<img src="http://169.254.169.254/latest/meta-data/"><img src="/portrait.png">',
-    );
-    expect(await portraitFromSheet(sheet)).toBeNull();
-  });
-
-  test("is checked by content, not by what the data URI claims", async () => {
-    const lie = Buffer.from("<script>alert(1)</script>".repeat(200)).toString("base64");
-    const sheet = await sheetWith(`<img src="data:image/png;base64,${lie}">`);
+  test("is not taken when what it holds is not an image at all", async () => {
+    const notAnImage = new TextEncoder().encode("<script>alert(1)</script>".repeat(300));
+    const sheet = await fileWith({ image: notAnImage });
     expect(await portraitFromSheet(sheet)).toBeNull();
   });
 });
@@ -402,11 +302,9 @@ describe("images are stored at the size, and in the format, they are best kept i
     expect(upload.mime).toBe(`image/${(await sizeOf(uploadPath(upload))).format}`);
   });
 
-  test("a portrait taken out of a sheet is scaled like any other picture", async () => {
+  test("a portrait taken out of a character file is scaled like any other picture", async () => {
     const portrait = await picture(Math.round(OVERSIZE * 1.5), OVERSIZE);
-    const sheet = await storeSheet(
-      file("hero.html", `<img src="data:image/png;base64,${Buffer.from(portrait).toString("base64")}">`),
-    );
+    const sheet = await storeSheet(hdcFile("Hero.hdc", { image: portrait }));
 
     const found = await portraitFromSheet(sheet);
     expect(await sizeOf(uploadPath(found!))).toMatchObject({ height: limits.storedImagePx });
@@ -415,7 +313,7 @@ describe("images are stored at the size, and in the format, they are best kept i
 
 describe("housekeeping", () => {
   test("finds and deletes files no row claims, and leaves claimed ones alone", async () => {
-    const kept = await storeSheet(file("kept.html", "<p>keep me</p>"));
+    const kept = await storeSheet(hdcFile("Kept.hdc"));
     // A file written straight into the upload directory, as an interrupted
     // upload or an older database would leave behind.
     const stray = join(dirname(uploadPath(kept)), "stray-file");
@@ -431,7 +329,7 @@ describe("housekeeping", () => {
   });
 
   test("deleting an upload whose file has already gone is not an error", async () => {
-    const upload = await storeSheet(file("gone.html", "<p>x</p>"));
+    const upload = await storeSheet(hdcFile("Gone.hdc"));
     await unlink(uploadPath(upload));
 
     await expect(deleteUpload(upload.id)).resolves.toBeUndefined();
