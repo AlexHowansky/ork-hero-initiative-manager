@@ -46,6 +46,25 @@ const IMAGE_ELEMENT = /[ \t]*<IMAGE\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/IMAGE>)\r?\n?/
 const IMAGE_BODY = /<IMAGE\b([^>]*)>([\s\S]*?)<\/IMAGE>/;
 const IMAGE_NAME = /FileName="([^"]*)"/;
 
+/** The character's own name, as HERO Designer records it. */
+const CHARACTER_NAME = /<CHARACTER_INFO\b[^>]*\bCHARACTER_NAME="([^"]*)"/;
+
+/**
+ * The five entities XML defines, which is all an attribute may carry.
+ *
+ * A name with a quotation mark in it — HERO Designer allows them, and characters
+ * with a nickname in their name have them — arrives as `&quot;`, and filing a
+ * character under a name with `&quot;` in it is worse than filing it under its
+ * filename.
+ */
+const ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+};
+
 /**
  * The CDATA section HERO Designer wraps the picture in.
  *
@@ -60,6 +79,14 @@ export interface SplitCharacter {
   readonly hdc: File;
   /** The picture, sized for a card — null when the file carried none. */
   readonly portrait: File | null;
+  /**
+   * The name the character gives itself, or null when the file gives none.
+   *
+   * Null is the answer for an unnamed character and for a file that could not be
+   * read at all, because they mean the same thing to a caller: there is nothing
+   * here better than the filename.
+   */
+  readonly name: string | null;
 }
 
 /**
@@ -170,6 +197,39 @@ async function fitPortrait(bytes: Uint8Array, name: string): Promise<File> {
 }
 
 /**
+ * An XML attribute's value as the text it stands for.
+ *
+ * Numeric references are decoded as well as the named ones. HERO Designer does
+ * not write them, but a name that has been through another tool may carry them,
+ * and a character called `Ork&#39;s Bane` should be filed under its name.
+ */
+function unescapeXml(value: string): string {
+  return value.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (whole, body: string) => {
+    if (body.startsWith("#")) {
+      const code = body[1]?.toLowerCase() === "x"
+        ? Number.parseInt(body.slice(2), 16)
+        : Number.parseInt(body.slice(1), 10);
+      return Number.isFinite(code) && code > 0 ? String.fromCodePoint(code) : whole;
+    }
+    return ENTITIES[body.toLowerCase()] ?? whole;
+  });
+}
+
+/**
+ * What the character calls itself, from the text of a character file.
+ *
+ * A character file is nearly always saved under its character's name, so the
+ * filename is usually the same answer — but not always, and it is the file that
+ * knows: a character renamed since it was last exported, or one saved as
+ * `Redshift (v3 final).hdc`, is filed under the name on the sheet.
+ */
+function characterName(text: string): string | null {
+  const found = CHARACTER_NAME.exec(text)?.[1];
+  const name = found === undefined ? "" : unescapeXml(found).trim();
+  return name === "" ? null : name;
+}
+
+/**
  * A character file separated into the character and its picture.
  *
  * A file with no picture in it comes back with `portrait: null` and its own
@@ -181,16 +241,20 @@ async function fitPortrait(bytes: Uint8Array, name: string): Promise<File> {
  * HERO Designer would not.
  */
 export async function splitCharacterFile(file: File): Promise<SplitCharacter> {
-  const unchanged: SplitCharacter = { hdc: file, portrait: null };
+  const unchanged: SplitCharacter = { hdc: file, portrait: null, name: null };
   try {
     const bytes = new Uint8Array(await file.arrayBuffer());
     const { text, label } = decode(bytes);
+    // Read before anything can go wrong with the picture, and carried through
+    // every path below: a file this cannot take apart is still a file that says
+    // what its character is called.
+    const named = { ...unchanged, name: characterName(text) };
 
     const found = IMAGE_BODY.exec(text);
-    if (!found) return unchanged;
+    if (!found) return named;
 
     const stripped = text.replace(IMAGE_ELEMENT, "");
-    if (stripped === text) return unchanged;
+    if (stripped === text) return named;
 
     const hdc = new File([encode(stripped, label) as BlobPart], file.name, { type: file.type });
 
@@ -204,11 +268,15 @@ export async function splitCharacterFile(file: File): Promise<SplitCharacter> {
     } catch {
       // The picture is unreadable but the character is not, so file the
       // character and let the server find nothing where the picture was.
-      return { hdc, portrait: null };
+      return { ...named, hdc, portrait: null };
     }
 
     const name = IMAGE_NAME.exec(found[1] ?? "")?.[1] ?? "portrait.png";
-    return { hdc, portrait: await fitPortrait(picture, name.replace(/[^\w.\- ]/g, "_")) };
+    return {
+      ...named,
+      hdc,
+      portrait: await fitPortrait(picture, name.replace(/[^\w.\- ]/g, "_")),
+    };
   } catch {
     return unchanged;
   }

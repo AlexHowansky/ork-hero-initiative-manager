@@ -199,18 +199,26 @@ function CharacterForm({
   const suggested = useRef<string | null>(null);
 
   /**
-   * Names the character after the file, since a sheet is nearly always saved
-   * under the character's name and retyping it is busywork.
+   * Names the character, since retyping a name the file already carries is
+   * busywork.
    *
-   * Only into an empty field, or over a name this same mechanism put there. The
-   * extension goes; nothing else about the filename is second-guessed.
+   * Only into an empty field, or over a name this same mechanism put there —
+   * which is also what lets the filename stand in until the file has been read
+   * and then be replaced by the name inside it. The game master's own typing is
+   * never overwritten, so a name typed in the moment between the two is kept.
+   *
+   * Through the setter rather than the rendered `name`, because the second
+   * suggestion arrives after an await and the value closed over by then is the
+   * one from before the first.
    */
-  const suggestNameFrom = (file: File) => {
-    if (name !== "" && name !== suggested.current) return;
-    const stripped = characterNameFor(file);
+  const suggestName = (candidate: string) => {
+    const stripped = candidate.trim().slice(0, NAME_MAX_LENGTH);
     if (!stripped) return;
-    suggested.current = stripped;
-    setName(stripped);
+    setName((current) => {
+      if (current !== "" && current !== suggested.current) return current;
+      suggested.current = stripped;
+      return stripped;
+    });
   };
 
   /**
@@ -248,6 +256,11 @@ function CharacterForm({
     try {
       const parts = await splitCharacterFile(file);
       split.current = { source: file, parts };
+      // What the character calls itself, over what its file is called. The
+      // filename is only ever a guess at this, and a character renamed since it
+      // was last exported — or exported as `Redshift (v3 final).hdc` — is filed
+      // under the name on its own sheet.
+      if (parts.name) suggestName(parts.name);
 
       const body = new FormData();
       body.set("hdc", parts.hdc);
@@ -307,7 +320,9 @@ function CharacterForm({
         accept=".hdc"
         hint="The character sheet is drawn from this file every time it is opened, so re-exporting a character and uploading them again is all it takes to keep their sheet current. The picture inside the file becomes the character's card, and is taken out of the file rather than stored twice."
         onFile={(file) => {
-          suggestNameFrom(file);
+          // The filename now, so the field is filled the moment a file is
+          // chosen; the name inside the file a moment later, once it is read.
+          suggestName(characterNameFor(file));
           void readStatsFrom(file);
         }}
       />
@@ -862,7 +877,18 @@ export function GmLibrary({ email, onSignOut }: { email: string; onSignOut: () =
     let updated = 0;
     for (const file of dropped) {
       try {
-        const name = characterNameFor(file);
+        // Split before uploading, as the dialog does: the picture goes as its
+        // own part, sized for a card, and what is left of the character file is
+        // a fraction of what was dropped. It also comes back with the name the
+        // character gives itself, which is why this happens before the character
+        // is looked for rather than after.
+        const parts = await splitCharacterFile(file);
+
+        // What the character calls itself, over what its file is called — and so
+        // also what decides whether this is a character the campaign already has.
+        // A file exported under a working filename updates the character whose
+        // name is inside it, which is the one it is.
+        const name = parts.name?.slice(0, NAME_MAX_LENGTH) ?? characterNameFor(file);
         if (!name) {
           throw new Error(`We couldn't work out a name for “${file.name}”.`);
         }
@@ -873,10 +899,6 @@ export function GmLibrary({ email, onSignOut }: { email: string; onSignOut: () =
             entry.name.localeCompare(name, undefined, { sensitivity: "base" }) === 0,
         );
 
-        // Split before uploading, as the dialog does: the picture goes as its
-        // own part, sized for a card, and what is left of the character file is
-        // a fraction of what was dropped.
-        const parts = await splitCharacterFile(file);
         const form = new FormData();
         form.set("sheet", parts.hdc);
         if (parts.portrait) form.set("sheetPortrait", parts.portrait);

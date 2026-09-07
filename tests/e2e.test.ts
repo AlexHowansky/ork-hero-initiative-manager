@@ -1904,11 +1904,11 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
       panel.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
     }, [[...hdcBytes({ name: "Gimli" })], [...hdcBytes({ name: "Legolas" })]]);
 
-    // Both are filed there and then, each named after its file, with no dialog
-    // in the way and nothing left to confirm.
+    // Both are filed there and then, each named after its character rather than
+    // after its file, with no dialog in the way and nothing left to confirm.
     await gm.getByText("Added 2 characters.").waitFor();
-    await gm.getByRole("button", { name: "Gimli son of Gloin", exact: true }).waitFor();
-    await gm.getByRole("button", { name: "View Gimli son of Gloin's sheet" }).waitFor();
+    await gm.getByRole("button", { name: "Gimli", exact: true }).waitFor();
+    await gm.getByRole("button", { name: "View Gimli's sheet" }).waitFor();
     await gm.getByRole("button", { name: "Legolas", exact: true }).waitFor();
     expect(await gm.getByRole("dialog").count()).toBe(0);
 
@@ -1937,9 +1937,10 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
     await gm.getByText("Updated 2 characters.").waitFor({ timeout: 5000 });
     expect(await gm.getByText(/already has a character called/).count()).toBe(0);
 
-    // Still two of them: an update is not a third card.
-    expect(await gm.getByRole("button", { name: "Gimli son of Gloin", exact: true }).count())
-      .toBe(1);
+    // Still two of them: an update is not a third card. Which is the other half
+    // of naming a character after itself — the dropped file is matched to the
+    // character whose name is inside it, whatever its file is called.
+    expect(await gm.getByRole("button", { name: "Gimli", exact: true }).count()).toBe(1);
     expect(await gm.getByRole("button", { name: "Legolas", exact: true }).count()).toBe(1);
 
     // And the numbers came off the dropped file, which the first ones did not
@@ -1949,7 +1950,7 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
     expect(await gm.getByLabel("SPD", { exact: true }).inputValue()).toBe("6");
   }, 60_000);
 
-  test("uploading a sheet names the character after the file", async () => {
+  test("uploading a sheet names the character after the character", async () => {
     if (!browser) return;
     const gm = await signedInGm();
 
@@ -1959,15 +1960,27 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
     await gm.getByRole("button", { name: "Create campaign" }).click();
     await gm.getByText(`Characters in ${campaignName}`).waitFor();
 
+    // Reading a file is asynchronous, so the name inside it lands a moment after
+    // the filename does. Waiting on the field is waiting for the whole of it.
+    const named = async (expected: string) => {
+      await gm.waitForFunction(
+        (want) =>
+          (document.querySelector("input[name='name']") as HTMLInputElement | null)?.value === want,
+        expected,
+        { timeout: 5000 },
+      );
+    };
+
     await gm.getByRole("button", { name: "Add", exact: true }).click();
     await gm.getByLabel(/Character file/).setInputFiles({
-      name: "Bilbo Baggins.hdc",
+      name: "Bilbo Baggins (v3 final).hdc",
       mimeType: "application/octet-stream",
       buffer: Buffer.from(hdcBytes({ name: "Bilbo" }) as Uint8Array<ArrayBuffer>),
     });
 
-    // The name is filled in from the file, extension and all else left behind.
-    expect(await gm.getByLabel("Name").inputValue()).toBe("Bilbo Baggins");
+    // The name is the character's own, not the working title its file was saved
+    // under.
+    await named("Bilbo");
 
     // A second file replaces a name that only came from the first.
     await gm.getByLabel(/Character file/).setInputFiles({
@@ -1975,15 +1988,24 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
       mimeType: "application/octet-stream",
       buffer: Buffer.from(hdcBytes({ name: "Frodo" }) as Uint8Array<ArrayBuffer>),
     });
-    expect(await gm.getByLabel("Name").inputValue()).toBe("Frodo Baggins");
+    await named("Frodo");
 
-    // But not a name the game master typed themselves.
+    // A file with no name of its own still falls back to what it is called.
+    await gm.getByLabel(/Character file/).setInputFiles({
+      name: "Meriadoc Brandybuck.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(hdcBytes({ name: "" }) as Uint8Array<ArrayBuffer>),
+    });
+    await named("Meriadoc Brandybuck");
+
+    // But nothing replaces a name the game master typed themselves.
     await gm.getByLabel("Name").fill("Samwise");
     await gm.getByLabel(/Character file/).setInputFiles({
-      name: "Meriadoc.hdc",
+      name: "Peregrin Took.hdc",
       mimeType: "application/octet-stream",
-      buffer: Buffer.from(hdcBytes({ name: "Merry" }) as Uint8Array<ArrayBuffer>),
+      buffer: Buffer.from(hdcBytes({ name: "Pippin" }) as Uint8Array<ArrayBuffer>),
     });
+    await gm.waitForTimeout(500);
     expect(await gm.getByLabel("Name").inputValue()).toBe("Samwise");
 
     await gm.getByRole("button", { name: "Add character" }).last().click();
@@ -1996,6 +2018,7 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
       mimeType: "application/octet-stream",
       buffer: Buffer.from(hdcBytes({ name: "Pippin" }) as Uint8Array<ArrayBuffer>),
     });
+    await gm.waitForTimeout(500);
     expect(await gm.getByLabel("Name").inputValue()).toBe("Samwise");
   }, 60_000);
 
@@ -2328,7 +2351,9 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
         panel.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer }));
       }
     }, [...hdcBytes({ name: "Bilbo" })]);
-    await page.getByRole("button", { name: "Bilbo Baggins", exact: true })
+    // Under the name inside the file, which is what a dropped character is filed
+    // as — the filename is only a guess at it.
+    await page.getByRole("button", { name: "Bilbo", exact: true })
       .waitFor({ timeout: 5000 });
 
     await page.close();

@@ -122,6 +122,47 @@ describe("splitting a character file before it is uploaded", () => {
     expect(parseHdc(await bytesOf(hdc)).info.characterName).toBe("Hero");
   });
 
+  test("reports the name the character gives itself", async () => {
+    // The filename is a guess at this and the file is the authority: a character
+    // renamed since it was last exported still has its old name on the file.
+    const { name } = await splitCharacterFile(
+      asFile(hdcBytes({ name: "Redshift", image: image(4096) }), "Redshift (v3 final).hdc"),
+    );
+    expect(name).toBe("Redshift");
+  });
+
+  test("reports the name from a file that has no picture to take out", async () => {
+    // Nothing to split is not nothing to read — this path hands the file back
+    // exactly as it arrived, and the name still has to come with it.
+    const { name, portrait } = await splitCharacterFile(asFile(hdcBytes({ name: "Bare" })));
+    expect(portrait).toBeNull();
+    expect(name).toBe("Bare");
+  });
+
+  test("the name comes back as text, not as markup", async () => {
+    // HERO Designer allows quotation marks in a name and writes them escaped.
+    // Filing a character under a name with `&quot;` in it is worse than filing
+    // it under its filename.
+    const { name } = await splitCharacterFile(
+      asFile(hdcBytes({ name: "Elias &quot;Eli&quot; Mercer &amp; Co." })),
+    );
+    expect(name).toBe('Elias "Eli" Mercer & Co.');
+  });
+
+  test("has no name to offer for a file it cannot read", async () => {
+    const { name } = await splitCharacterFile(new File(["not a character file"], "hero.hdc"));
+    expect(name).toBeNull();
+  });
+
+  test("agrees with the server about the name", async () => {
+    // Two readers of the same attribute — this one by hand, the server's through
+    // the renderer's parser. A character filed here under one name and rendered
+    // under another is a character nobody can find.
+    const original = await Bun.file(REDSHIFT).arrayBuffer();
+    const { name } = await splitCharacterFile(new File([original], "not-the-name.hdc"));
+    expect(name).toBe(parseHdc(new Uint8Array(original)).info.characterName);
+  });
+
   test("agrees with the server about what the picture is", async () => {
     // Two readers of the same element — this one by hand, the server's through
     // the renderer's parser. They must not disagree about a character's face.
