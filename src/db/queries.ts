@@ -21,6 +21,7 @@ import type {
   PlayerRow,
   SessionCharacterRow,
   SessionEventRow,
+  TemplateRow,
   UploadKind,
   UploadRow,
 } from "./types.ts";
@@ -58,6 +59,8 @@ export const gms = {
       passwordHash?: string;
       cardImagePx?: number;
       showAllNpcs?: boolean;
+      /** null is the template this app ships, which is what no choice means. */
+      templateId?: string | null;
     },
   ): void {
     if (changes.email !== undefined) {
@@ -79,6 +82,10 @@ export const gms = {
       // schema is written as.
       db.query("UPDATE gms SET show_all_npcs = $on, updated_at = $ts WHERE id = $id")
         .run({ id, on: changes.showAllNpcs ? 1 : 0, ts: now() });
+    }
+    if (changes.templateId !== undefined) {
+      db.query("UPDATE gms SET template_id = $templateId, updated_at = $ts WHERE id = $id")
+        .run({ id, templateId: changes.templateId, ts: now() });
     }
   },
 
@@ -262,6 +269,83 @@ export const uploads = {
         AND id NOT IN (SELECT card_upload_id FROM characters WHERE card_upload_id IS NOT NULL)
         AND id NOT IN (SELECT sheet_upload_id FROM characters)
     `).all();
+  },
+};
+
+/* ------------------------------------------------------------------ templates */
+
+/**
+ * Export templates, which are a game master's own rather than the deployment's.
+ *
+ * Not `uploads` rows, and deliberately: that table's `kind` admits two values
+ * behind a CHECK, its orphan sweep is an allowlist of the three columns that
+ * reference a file, and a row in it has no owner. A template is owned — each
+ * game master keeps their own collection — and nothing else references it but
+ * the `gms` row that has it selected.
+ */
+export const templates = {
+  /**
+   * `id` is accepted rather than minted here for the same reason `uploads.create`
+   * accepts one: the file is written first, named after the row about to
+   * describe it.
+   */
+  create(input: {
+    id?: string;
+    gmId: string;
+    name: string;
+    byteSize: number;
+    sha256: string;
+    originalName: string;
+  }): TemplateRow {
+    const id = input.id ?? newId();
+    const timestamp = now();
+    db.query(`
+      INSERT INTO templates
+        (id, gm_id, name, original_name, byte_size, sha256, created_at, updated_at)
+      VALUES ($id, $gmId, $name, $originalName, $byteSize, $sha256, $timestamp, $timestamp)
+    `).run({ ...input, id, timestamp });
+    return templates.byId(id)!;
+  },
+
+  byId(id: string): TemplateRow | null {
+    return db.query<TemplateRow, { id: string }>("SELECT * FROM templates WHERE id = $id")
+      .get({ id });
+  },
+
+  /** The one this game master already has under this name, if they have one. */
+  byName(gmId: string, name: string): TemplateRow | null {
+    return db.query<TemplateRow, { gmId: string; name: string }>(
+      "SELECT * FROM templates WHERE gm_id = $gmId AND name = $name COLLATE NOCASE",
+    ).get({ gmId, name });
+  },
+
+  listForGm(gmId: string): TemplateRow[] {
+    return db.query<TemplateRow, { gmId: string }>(
+      "SELECT * FROM templates WHERE gm_id = $gmId ORDER BY name COLLATE NOCASE",
+    ).all({ gmId });
+  },
+
+  /** Every row, for the sweep that looks for files no row claims. */
+  all(): TemplateRow[] {
+    return db.query<TemplateRow, []>("SELECT * FROM templates").all();
+  },
+
+  /**
+   * Records that a stored template has been rewritten in place — which is what a
+   * re-upload under a name this game master already has is: the same template,
+   * exported again. The row keeps its id, so a template that was in use stays in
+   * use across the update.
+   */
+  rewrite(id: string, input: { byteSize: number; sha256: string; originalName: string }): void {
+    db.query(`
+      UPDATE templates
+      SET byte_size = $byteSize, sha256 = $sha256, original_name = $originalName, updated_at = $ts
+      WHERE id = $id
+    `).run({ ...input, id, ts: now() });
+  },
+
+  remove(id: string): void {
+    db.query("DELETE FROM templates WHERE id = $id").run({ id });
   },
 };
 

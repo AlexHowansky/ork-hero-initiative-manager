@@ -104,6 +104,40 @@ ${characteristics}
   return bytes;
 }
 
+/**
+ * A HERO Designer export template, built to order.
+ *
+ * Plain UTF-8 with no byte-order mark — which is what an `.hde` is, and
+ * deliberately not what `hdcBytes` writes: a character file is UTF-16 big endian
+ * with a mark. The two look alike and are not, and a test that got them the wrong
+ * way round would be testing the decoder rather than the template.
+ *
+ * `marker` is a string that appears in the rendered page and nowhere else, which
+ * is how a test tells *which* template a sheet came out of. `directives: false`
+ * builds the one thing an upload has to refuse: a file that parses but would put
+ * none of the character on the page.
+ */
+export function hdeSource(
+  options: { name?: string; marker?: string; directives?: boolean } = {},
+): string {
+  const name = options.name ?? "Test Template";
+  const marker = options.marker ?? "";
+  const body = options.directives === false
+    ? `<p>${marker}</p>`
+    : `<h1><!--CHARACTER_NAME--></h1>\n<p>${marker}</p>\n<p><!--CHARACTER_FILE--></p>`;
+  return `<!--TEMPLATE_NAME-->${
+    options.directives === false ? "" : name
+  }<!--/TEMPLATE_NAME-->\n<!DOCTYPE html>\n<html lang="en">\n<head><meta charset="utf-8"></head>\n<body>\n${body}\n</body>\n</html>\n`;
+}
+
+/** The same, as the `File` an upload arrives as. */
+export function hdeFile(
+  fileName = "Template.hde",
+  options: Parameters<typeof hdeSource>[0] = {},
+): File {
+  return new File([hdeSource(options)], fileName);
+}
+
 /** The same, as the `File` an upload arrives as. */
 export function hdcFile(
   name = "Hero.hdc",

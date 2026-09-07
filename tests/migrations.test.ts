@@ -47,7 +47,7 @@ describe("one active session per campaign", () => {
     addActiveSession(target, "new", "2026-01-01T12:00:00.000Z");
 
     // Every migration after 001, which `atInitialSchema` has already applied.
-    expect(migrate(target)).toBe(13);
+    expect(migrate(target)).toBe(14);
 
     const statuses = Object.fromEntries(
       target.query<{ id: string; status: string }, []>(
@@ -315,6 +315,75 @@ describe("a game master's library reach", () => {
       "SELECT show_all_npcs FROM gms WHERE id = 'gm1'",
     ).get()!.show_all_npcs;
     expect(flag).toBe(0);
+  });
+});
+
+describe("a game master's export templates", () => {
+  test("an account that has never chosen one renders through the built-in", () => {
+    const target = atInitialSchema();
+
+    migrate(target);
+
+    // NULL, which is what "has never chosen" means and the only value that needs
+    // no template row to exist. A sheet drawn for this account goes through the
+    // template the app ships, exactly as it did before there was a choice.
+    expect(
+      target.query<{ template_id: string | null }, []>(
+        "SELECT template_id FROM gms WHERE id = 'gm1'",
+      ).get()!.template_id,
+    ).toBeNull();
+  });
+
+  test("one name per game master, but two game masters may use the same one", () => {
+    const target = atInitialSchema();
+    migrate(target);
+    target.exec(`
+      INSERT INTO gms VALUES
+        ('gm2', 'other@example.com', 'hash', '2026-01-01T00:00:00.000Z',
+         '2026-01-01T00:00:00.000Z', 176, 0, NULL);
+      INSERT INTO templates VALUES
+        ('t1', 'gm1', 'Ork 16x9', 'ork.hde', 10, 'sha', '2026-01-01T00:00:00.000Z',
+         '2026-01-01T00:00:00.000Z');
+    `);
+
+    // Their own collection each: the same template exported by two game masters
+    // is two files, and neither is in the other's way.
+    expect(() =>
+      target.exec(`
+        INSERT INTO templates VALUES
+          ('t2', 'gm2', 'Ork 16x9', 'ork.hde', 10, 'sha', '2026-01-01T00:00:00.000Z',
+           '2026-01-01T00:00:00.000Z')
+      `)
+    ).not.toThrow();
+
+    // But one of them twice is that template being updated, which is a rewrite
+    // of the row it already has rather than a second one.
+    expect(() =>
+      target.exec(`
+        INSERT INTO templates VALUES
+          ('t3', 'gm1', 'ORK 16X9', 'ork.hde', 10, 'sha', '2026-01-01T00:00:00.000Z',
+           '2026-01-01T00:00:00.000Z')
+      `)
+    ).toThrow();
+  });
+
+  test("a deleted game master takes their templates with them", () => {
+    const target = atInitialSchema();
+    migrate(target);
+    target.exec(`
+      INSERT INTO templates VALUES
+        ('t1', 'gm1', 'Mine', 'mine.hde', 10, 'sha', '2026-01-01T00:00:00.000Z',
+         '2026-01-01T00:00:00.000Z');
+      UPDATE gms SET template_id = 't1' WHERE id = 'gm1';
+    `);
+
+    target.exec("DELETE FROM gms WHERE id = 'gm1'");
+
+    // The cascade, which is what keeps one account's collection from outliving
+    // it. The files it leaves behind are the CLI's business — see `gm:delete`.
+    expect(
+      target.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM templates").get()!.count,
+    ).toBe(0);
   });
 });
 

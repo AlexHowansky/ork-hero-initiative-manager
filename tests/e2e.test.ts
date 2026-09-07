@@ -14,7 +14,8 @@ import { serverOptions } from "../src/server/app.ts";
 import { registerServer } from "../src/server/ws.ts";
 import { gms } from "../src/db/queries.ts";
 import { CARD_IMAGE_PX } from "../src/lib/cards.ts";
-import { hdcBytes, rulesAvailable, unique } from "./helpers.ts";
+import { hdcBytes, hdeSource, rulesAvailable, unique } from "./helpers.ts";
+import { BUILT_IN_TEMPLATE_ID } from "../src/lib/templates.ts";
 
 const PASSWORD = "a-sufficiently-long-password";
 const email = `${unique("gm")}@example.com`;
@@ -2559,6 +2560,72 @@ describe("how big cards are drawn is the reader's own setting", () => {
 
     await page.close();
   });
+});
+
+describe("the export template a game master's sheets are drawn through", () => {
+  test("is chosen, uploaded and removed in the settings drawer", async () => {
+    if (!browser) return;
+    const page = await signedInGm();
+
+    await page.getByRole("button", { name: "Settings" }).click();
+    const drawer = page.locator('aside[aria-label="Settings"]');
+    const template = drawer.getByLabel("Template", { exact: true });
+
+    // The one this app ships, which is what an account that has chosen nothing
+    // is drawn through — and the list it is the first row of.
+    // The list is fetched as the drawer opens, so this is waited for rather than
+    // read: what is in the select before the answer lands is a placeholder.
+    await page.waitForFunction(
+      () =>
+        document.querySelectorAll("#setting-template option").length === 1 &&
+        document.querySelector("#setting-template option")?.textContent === "Ork 16x9",
+      undefined,
+      { timeout: 5000 },
+    );
+    expect(await template.inputValue()).toBe(BUILT_IN_TEMPLATE_ID);
+
+    // Uploading selects it: a game master who files a template is saying what
+    // they want their sheets to look like, and a second press to use it would
+    // read as the app having ignored the first.
+    const saved = page.waitForResponse(
+      (response) => response.url().endsWith("/api/settings") && response.status() === 200,
+    );
+    await drawer.getByLabel("Upload an export template").setInputFiles({
+      name: "Mine.hde",
+      mimeType: "text/html",
+      buffer: Buffer.from(hdeSource({ name: "My Own Layout" })),
+    });
+    await page.getByText("Added “My Own Layout”.").waitFor({ timeout: 5000 });
+    await saved;
+    expect(await template.locator("option").allTextContents()).toEqual([
+      "Ork 16x9",
+      "My Own Layout",
+    ]);
+    // Selected, not merely filed.
+    expect(await template.inputValue()).not.toBe(BUILT_IN_TEMPLATE_ID);
+
+    // The one in use cannot be deleted, and the drawer says so before the press
+    // rather than after it — the server refuses it either way.
+    const remove = drawer.getByRole("button", { name: /My Own Layout/ });
+    expect(await remove.isDisabled()).toBe(true);
+
+    // Choosing another one is the press the message asks for, and then it goes.
+    await template.selectOption(BUILT_IN_TEMPLATE_ID);
+    expect(await remove.isDisabled()).toBe(false);
+    await remove.click();
+    await page.getByText("Deleted “My Own Layout”.").waitFor({ timeout: 5000 });
+    expect(await template.locator("option").allTextContents()).toEqual(["Ork 16x9"]);
+
+    // And the choice is the account's rather than the page's.
+    await page.reload();
+    await page.getByRole("button", { name: "Settings" }).click();
+    await page.waitForFunction(
+      (id) =>
+        (document.querySelector("#setting-template") as HTMLSelectElement | null)?.value === id,
+      BUILT_IN_TEMPLATE_ID,
+      { timeout: 5000 },
+    );
+  }, 60_000);
 });
 
 describe("the session library can reach past its own campaign", () => {

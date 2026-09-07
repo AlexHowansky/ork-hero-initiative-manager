@@ -15,6 +15,7 @@ import {
   collectStrayFiles,
   findStrayFiles,
 } from "../server/uploads.ts";
+import { deleteTemplatesForGm } from "../server/templates.ts";
 import { parse, schemas } from "../lib/validate.ts";
 import { limits } from "../lib/config.ts";
 import { AppError } from "../lib/errors.ts";
@@ -196,15 +197,23 @@ async function gmDelete(args: Args): Promise<void> {
     }
   }
 
+  // Before the account, not after: their export templates go with them by
+  // database cascade, and once those rows are gone nothing on the instance can
+  // name the files any more — `collectOrphanedUploads` reads the `uploads` table
+  // and would never see them.
+  const templatesDeleted = await deleteTemplatesForGm(gm.id);
+
   gms.remove(gm.id);
   // The cascade takes their campaigns, characters and sessions, but an upload
   // row is referenced rather than owned, so their sheets and cards would survive
   // as orphans. Sweeping here is what keeps `db:gc` from having anything to find.
   const collected = await collectOrphanedUploads();
+  const also = [
+    collected > 0 ? `${collected} upload(s) nothing referenced any more` : null,
+    templatesDeleted > 0 ? `${templatesDeleted} export template(s)` : null,
+  ].filter(Boolean);
   console.log(
-    collected > 0
-      ? `Deleted ${gm.email}, and ${collected} upload(s) nothing referenced any more.`
-      : `Deleted ${gm.email}.`,
+    also.length > 0 ? `Deleted ${gm.email}, and ${also.join(" and ")}.` : `Deleted ${gm.email}.`,
   );
 }
 

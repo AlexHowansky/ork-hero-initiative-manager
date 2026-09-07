@@ -20,7 +20,16 @@ import { CARD_IMAGE_PX } from "../../lib/cards.ts";
 import { api } from "../api.ts";
 import { useCardSize } from "../cardSize.ts";
 import { useGmSetting } from "../gmSettings.ts";
-import { Button, Icon, Panel, PANEL_CAPTION, TEXT_MUTED } from "./ui.tsx";
+import {
+  Button,
+  DeleteIcon,
+  Icon,
+  IconButton,
+  Panel,
+  PANEL_CAPTION,
+  TEXT_MUTED,
+} from "./ui.tsx";
+import type { TemplateSummary } from "../types.ts";
 import { useToast } from "./Toast.tsx";
 
 /* -------------------------------------------------------------------- state */
@@ -74,6 +83,7 @@ const SAVE_DELAY_MS = 400;
 /** Ties each control to its label. One drawer to a page, so one id each will do. */
 const CARD_SIZE_ID = "setting-card-size";
 const SHOW_ALL_NPCS_ID = "setting-show-all-npcs";
+const TEMPLATE_ID = "setting-template";
 
 /**
  * Writes one setting, and says so when it cannot.
@@ -243,6 +253,171 @@ function ShowAllNpcs({ heldOn }: { heldOn: string | null }) {
   );
 }
 
+/**
+ * Which export template this game master's character sheets are drawn through.
+ *
+ * A sheet is not stored — it is built on every request by applying a template to
+ * the character file — so this setting is the whole look of every sheet at their
+ * table, and it changes on the very next one opened, with nothing to invalidate.
+ *
+ * Three controls for one idea, which is why they share a section rather than
+ * being three settings. The `select` is the setting: it says which template is in
+ * force. The list under it is the collection that select is choosing from, and
+ * the only thing there is to do to a template besides choose it is remove it. The
+ * file input adds to the collection.
+ *
+ * The template this app ships is in the list and is not in the list of things
+ * that can be deleted — a game master who has uploaded nothing still has working
+ * sheets, and so does one who has deleted everything they uploaded.
+ */
+function Template({ open }: { open: boolean }) {
+  const [active, setActive] = useGmSetting("templateId");
+  const save = useSaveSetting();
+  const toast = useToast();
+  const [list, setList] = useState<TemplateSummary[]>([]);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const { templates } = await api.get<{ templates: TemplateSummary[] }>("/api/templates");
+      setList(templates);
+    } catch (error) {
+      toast.showError(error);
+    }
+  }, [toast]);
+
+  // On every opening rather than once. The drawer is always mounted — shut, it
+  // is `inert` rather than gone — so fetching on mount would ask on every page
+  // load for a panel nobody opened; and a collection can have changed in the
+  // other tab since the last look.
+  useEffect(() => {
+    if (open) void load();
+  }, [open, load]);
+
+  const choose = (id: string) => {
+    setActive(id);
+    save({ templateId: id });
+  };
+
+  /**
+   * Files a chosen template, and selects it.
+   *
+   * Selecting it is the point: a game master who uploads a template is telling
+   * us what they want their sheets to look like, and the alternative is a second
+   * press that reads as the app having ignored the first. A *replacement* is the
+   * exception — the same template exported again — because it may well be active
+   * already, and switching their selection because they re-exported something
+   * would be a surprise rather than a service.
+   */
+  const upload = async (file: File | null) => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      const body = new FormData();
+      body.set("template", file);
+      const { template, replaced } = await api.postForm<
+        { template: TemplateSummary; replaced: boolean }
+      >("/api/templates", body);
+      await load();
+      if (!replaced) choose(template.id);
+      toast.show(
+        replaced ? `Updated “${template.name}”.` : `Added “${template.name}”.`,
+        "success",
+      );
+    } catch (error) {
+      toast.showError(error);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (template: TemplateSummary) => {
+    try {
+      await api.delete(`/api/templates/${template.id}`);
+      await load();
+      toast.show(`Deleted “${template.name}”.`, "success");
+    } catch (error) {
+      toast.showError(error);
+    }
+  };
+
+  const mine = list.filter((template) => !template.builtIn);
+
+  return (
+    <Setting
+      id={TEMPLATE_ID}
+      label="Template"
+      // Nothing on the caption line: a template is named after the file it came
+      // out of, and those run long. Sharing the line with the label would leave
+      // it a third of the drawer to show a name in, so it takes the next line and
+      // the whole width instead.
+      control={null}
+    >
+      <select
+        id={TEMPLATE_ID}
+        className="select select-sm w-full"
+        value={active}
+        onChange={(event) => choose(event.target.value)}
+      >
+        {/* A list that has not arrived yet still has to hold the value the
+            identity gave us, or the select would show its first option and
+            read as a choice nobody made. */}
+        {list.length === 0
+          ? <option value={active}>Loading…</option>
+          : list.map((template) => (
+            <option key={template.id} value={template.id}>{template.name}</option>
+          ))}
+      </select>
+
+      <p className={`text-xs ${TEXT_MUTED}`}>
+        The HERO Designer export template your character sheets are drawn through.
+        Sheets are built as they are opened, so a change shows on the next one.
+      </p>
+
+      {mine.length > 0
+        ? (
+          <ul className="space-y-1">
+            {mine.map((template) => (
+              <li key={template.id} className="flex items-center justify-between gap-2">
+                <span className="truncate text-xs" title={template.originalName}>
+                  {template.name}
+                </span>
+                <IconButton
+                  bare
+                  danger
+                  label={template.id === active
+                    // The server refuses this either way; saying so before the
+                    // press is the half that saves a reader the round trip.
+                    ? `Your sheets are drawn with ${template.name}. Choose another one first.`
+                    : `Delete ${template.name}`}
+                  icon={<DeleteIcon />}
+                  disabled={template.id === active}
+                  onClick={() => void remove(template)}
+                />
+              </li>
+            ))}
+          </ul>
+        )
+        : null}
+
+      <input
+        type="file"
+        accept=".hde"
+        disabled={busy}
+        aria-label="Upload an export template"
+        className="file-input file-input-sm w-full"
+        onChange={(event) => {
+          const file = event.target.files?.item(0) ?? null;
+          // Cleared so that choosing the same file twice — a template edited
+          // between the two — is two uploads rather than one and a shrug.
+          event.target.value = "";
+          void upload(file);
+        }}
+      />
+    </Setting>
+  );
+}
+
 /* ------------------------------------------------------------------- drawer */
 
 export function SettingsDrawer({
@@ -325,6 +500,7 @@ export function SettingsDrawer({
           <div className="space-y-5">
             <CardSize />
             <ShowAllNpcs heldOn={showAllNpcsHeldOn} />
+            <Template open={open} />
           </div>
         </Panel>
       </div>

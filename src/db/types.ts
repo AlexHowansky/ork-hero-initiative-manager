@@ -12,6 +12,12 @@ export interface GmRow {
   card_image_px: number;
   /** 1 when their session library should reach past the session's own campaign. */
   show_all_npcs: number;
+  /**
+   * The export template their character sheets are rendered through, or null for
+   * the one this app ships — which is what a game master who has never chosen
+   * means, and the only answer that needs no row to exist.
+   */
+  template_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -35,6 +41,19 @@ export interface UploadRow {
   sha256: string;
   original_name: string;
   created_at: string;
+}
+
+/** A HERO Designer export template a game master has uploaded. */
+export interface TemplateRow {
+  id: string;
+  gm_id: string;
+  /** What the template calls itself, from its own `<!--TEMPLATE_NAME-->`. */
+  name: string;
+  original_name: string;
+  byte_size: number;
+  sha256: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface CampaignRow {

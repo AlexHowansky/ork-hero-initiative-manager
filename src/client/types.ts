@@ -110,11 +110,31 @@ export interface Snapshot {
   events: SessionEvent[];
 }
 
+/**
+ * One export template in the list a game master picks from.
+ *
+ * The template this app ships is a row like any other, and `builtIn` is the only
+ * thing that marks it out: it is the one that cannot be deleted.
+ */
+export interface TemplateSummary {
+  id: string;
+  name: string;
+  builtIn: boolean;
+  originalName: string;
+  createdAt: string | null;
+}
+
 export type Identity =
   | { kind: "anonymous" }
   | {
       kind: "gm";
-      gm: { id: string; email: string; cardImagePx: number; showAllNpcs: boolean };
+      gm: {
+        id: string;
+        email: string;
+        cardImagePx: number;
+        showAllNpcs: boolean;
+        templateId: string;
+      };
     }
   | {
       kind: "player";

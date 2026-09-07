@@ -26,6 +26,7 @@ import { currentGm, currentPlayer } from "../middleware/auth.ts";
 import { campaigns, characters, uploads } from "../../db/queries.ts";
 import { uploadPath } from "../uploads.ts";
 import { HDC_MIME, renderSheet } from "../hero-sheet.ts";
+import { templateSourceForGm } from "../templates.ts";
 import { log } from "../../lib/log.ts";
 import type { UploadRow } from "../../db/types.ts";
 
@@ -58,12 +59,18 @@ export const fileRoutes = {
       const character = characters.byId(characterId);
       if (!character) throw errors.notFound("We couldn't find that character sheet.");
 
+      // Read before the branch rather than inside it, because it answers two
+      // questions now: whether this game master owns the character, and — for
+      // either kind of reader — whose export template the sheet is drawn
+      // through.
+      const campaign = campaigns.byId(character.campaign_id);
+      if (!campaign) throw errors.notFound("We couldn't find that character sheet.");
+
       let allowed = false;
 
       const gm = currentGm(request);
       if (gm) {
-        const campaign = campaigns.byId(character.campaign_id);
-        allowed = campaign?.gm_id === gm.id;
+        allowed = campaign.gm_id === gm.id;
       } else {
         const identity = currentPlayer(request);
         // Players see only the sheet of the character they have claimed.
@@ -92,7 +99,11 @@ export const fileRoutes = {
 
       let html: string;
       try {
-        html = await renderSheet(new Uint8Array(await file.arrayBuffer()), upload);
+        // The template belongs to the game master who owns the character, never
+        // to whoever is asking: a player reading their own sheet sees it in the
+        // frame the game master who filed them chose.
+        const template = await templateSourceForGm(campaign.gm_id);
+        html = await renderSheet(new Uint8Array(await file.arrayBuffer()), upload, template);
       } catch (error) {
         // Not a 404, which everything above it is: those say "this is not yours
         // to see", and this says "this is yours and it would not build". A game

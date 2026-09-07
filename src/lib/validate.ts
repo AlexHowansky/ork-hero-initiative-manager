@@ -137,6 +137,13 @@ export const schemas = {
       .max(CARD_IMAGE_PX.max)
       .optional(),
     showAllNpcs: z.boolean().optional(),
+    /**
+     * Which export template their sheets are drawn through, as an id the browser
+     * can put in a `<select>` — the built-in travels under its own sentinel
+     * rather than as a null. That it names one of *their* templates is the
+     * route's to check, not the schema's.
+     */
+    templateId: z.string().min(1).max(64).optional(),
   }),
 
   /**

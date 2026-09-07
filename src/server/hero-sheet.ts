@@ -13,23 +13,27 @@
  * browser's own needs — splitting the portrait out before an upload — are small
  * enough to be written directly, and are in `client/hdc.ts`.
  *
- * Nothing here caches a rendered sheet. The rules and the export template are
- * read once and held, because they are the same for every character and cost
- * hundreds of milliseconds to parse; the HTML they produce is built fresh on
- * every request, so a re-uploaded character is never shown from a stale copy.
+ * Nothing here caches a rendered sheet. The rules are read once and held,
+ * because they are the same for every character and cost hundreds of
+ * milliseconds to parse; the HTML they produce is built fresh on every request,
+ * so a re-uploaded character is never shown from a stale copy. The export
+ * template a sheet is drawn through arrives as an argument — whose it is, and
+ * where it is kept, is `server/templates.ts`.
  */
 
-import { resolve } from "node:path";
 import {
   buildSheet,
   decodeCharacterFile,
   HeroError,
+  isTextNode,
   parseCharacterFile,
+  parseTemplate,
   render,
   RulesLibrary,
   type CharacterFile,
   type DetectedEncoding,
   type Logger,
+  type ParsedTemplate,
 } from "ork-hero-export-renderer";
 import { config } from "../lib/config.ts";
 import { errors } from "../lib/errors.ts";
@@ -39,17 +43,6 @@ import type { UploadRow } from "../db/types.ts";
 
 /** The type this app stores a character file under, and serves nothing as. */
 export const HDC_MIME = "application/x-hero-designer-character";
-
-/**
- * The export template every sheet is rendered through.
- *
- * One template for the whole deployment, hardcoded: it is this project's own
- * (see the `ork-hero-templates` repository), and it is what the cards, the
- * player screen and the sheet overlay were all designed around. Letting a game
- * master upload their own is a later piece of work, and it is why this is a
- * single named constant rather than a path spread through the module.
- */
-const TEMPLATE_PATH = resolve(import.meta.dir, "../../assets/Ork-16x9.hde");
 
 /**
  * The talent that grants an initiative bonus, and the only form of it that
@@ -83,24 +76,21 @@ const logger: Logger = {
 };
 
 /**
- * The rules and the template, read once.
+ * The rules, read once.
  *
- * Both are the same for every character in the deployment and neither is small —
- * the rules are megabytes of JSON, nine of whose seventeen systems extend a
- * shared megabyte. Held as the promises rather than the values so that two
- * requests arriving together do the work once between them.
+ * They are the same for every character in the deployment and they are not small
+ * — megabytes of JSON, nine of whose seventeen systems extend a shared megabyte.
+ * Held as the promise rather than the value so that two requests arriving
+ * together do the work once between them. The templates are the other half of
+ * what a sheet is built from, and they are a game master's own rather than the
+ * deployment's, so they are cached next to where they are stored
+ * (`server/templates.ts`).
  */
 let rules: Promise<RulesLibrary> | null = null;
-let template: Promise<string> | null = null;
 
 function rulesLibrary(): Promise<RulesLibrary> {
   rules ??= RulesLibrary.load(config.heroRulesDir, logger);
   return rules;
-}
-
-function templateSource(): Promise<string> {
-  template ??= Bun.file(TEMPLATE_PATH).text();
-  return template;
 }
 
 /**
@@ -127,6 +117,52 @@ export function parseHdc(bytes: Uint8Array, source?: string): CharacterFile {
       "We couldn't read that character file. It should be a .hdc saved by HERO Designer.",
     );
   }
+}
+
+/**
+ * Whether a parsed template would actually put a character on the page.
+ *
+ * The library's own `hasDirectives`, which it is not re-exported from the
+ * package index — four lines, and cheaper than a deep import into its `dist`.
+ * A file with no directives in it is not a template: nothing of the character
+ * reaches the page, and every sheet comes out the same.
+ *
+ * It matters because sheets render with `strict: false`. In strict mode the
+ * library refuses such a file; with strict off it warns into the log and renders
+ * the page anyway, and a warning during a render is invisible to the game master
+ * who is looking at the sheet. The upload is the one place this can be said out
+ * loud.
+ */
+function hasDirectives(template: ParsedTemplate): boolean {
+  return template.name.length > 0 ||
+    template.fileExtensions.length > 0 ||
+    template.body.some((node) => !isTextNode(node));
+}
+
+/**
+ * The parsed export template, or a 400 explaining why this is not one.
+ *
+ * The same shape as `parseHdc`: the library's own message where it has one,
+ * since those are written for a person.
+ */
+export function parseHde(source: string, name?: string): ParsedTemplate {
+  let template: ParsedTemplate;
+  try {
+    template = parseTemplate(source, name === undefined ? undefined : { source: name });
+  } catch (error) {
+    throw asAppError(
+      error,
+      "We couldn't read that export template. It should be a .hde saved by HERO Designer.",
+    );
+  }
+
+  if (!hasDirectives(template)) {
+    throw errors.badRequest(
+      "That file has no template directives in it, so every character would come out " +
+        "of it looking the same. It should be a .hde saved by HERO Designer.",
+    );
+  }
+  return template;
 }
 
 /**
@@ -248,9 +284,15 @@ function encode(text: string, encoding: DetectedEncoding): Uint8Array {
  * and wrong for a game master who has just clicked a character's name mid-fight:
  * a blank where one line should be is recoverable, a blank page is not.
  */
-export async function renderSheet(bytes: Uint8Array, upload: UploadRow): Promise<string> {
-  const [source] = await Promise.all([templateSource(), rulesLibrary()]);
-  return await render(bytes, source, {
+export async function renderSheet(
+  bytes: Uint8Array,
+  upload: UploadRow,
+  templateSource: string,
+): Promise<string> {
+  // The rules are awaited only to warm the cache; `render` loads them itself
+  // from `rulesDirectory`, and the library memoises that.
+  await rulesLibrary();
+  return await render(bytes, templateSource, {
     strict: false,
     logger,
     rulesDirectory: config.heroRulesDir,

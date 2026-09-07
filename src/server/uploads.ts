@@ -1,8 +1,11 @@
 /**
  * Upload intake.
  *
- * Two kinds of file arrive: HERO Designer character files (`.hdc`) and card
- * images.
+ * Three kinds of file arrive: HERO Designer character files (`.hdc`), card
+ * images, and the export templates (`.hde`) a game master's sheets are rendered
+ * through. The first two are `uploads` rows; a template is its own row in its
+ * own table, and what this module owns of it is where the file goes — see
+ * `server/templates.ts` for the rest.
  *
  * A character file is data, not a document. Nothing in it is ever executed, and
  * the sheet a game master looks at is rendered from it on demand
@@ -28,11 +31,24 @@ import { log } from "../lib/log.ts";
 import { newId } from "../lib/ids.ts";
 import { HDC_MIME, imageFromHdc, parseHdc, statsFromHdc, withoutImage } from "./hero-sheet.ts";
 import type { HeroStatField } from "../lib/hero.ts";
-import { uploads } from "../db/queries.ts";
+import { templates, uploads } from "../db/queries.ts";
 import type { UploadRow } from "../db/types.ts";
 
 const CHARACTER_DIR = resolve(config.uploadDir, "characters");
 const IMAGE_DIR = resolve(config.uploadDir, "images");
+export const TEMPLATE_DIR = resolve(config.uploadDir, "templates");
+
+/**
+ * Where an export template's file is.
+ *
+ * Derived from the row rather than stored on it, unlike `uploads.disk_path`:
+ * that column exists because rows written years ago hold an absolute path, and a
+ * table with no history has nothing to be compatible with. A template file is
+ * always this, named after the row that describes it.
+ */
+export function templatePath(id: string): string {
+  return join(TEMPLATE_DIR, id);
+}
 
 /**
  * Where an upload's file actually is.
@@ -49,6 +65,7 @@ export function uploadPath(row: Pick<UploadRow, "disk_path">): string {
 
 await mkdir(CHARACTER_DIR, { recursive: true });
 await mkdir(IMAGE_DIR, { recursive: true });
+await mkdir(TEMPLATE_DIR, { recursive: true });
 
 /** Magic-byte signatures, so an image is checked by content rather than by name. */
 const IMAGE_SIGNATURES: ReadonlyArray<{ mime: string; test: (bytes: Uint8Array) => boolean }> = [
@@ -78,11 +95,11 @@ function detectImageMime(bytes: Uint8Array): string | null {
 }
 
 /** Keeps a readable trace of what was uploaded without letting it influence a path. */
-function safeOriginalName(name: string): string {
+export function safeOriginalName(name: string): string {
   return name.replace(/[^\w.\- ]/g, "_").slice(0, 120) || "upload";
 }
 
-function sha256(bytes: Uint8Array): string {
+export function sha256(bytes: Uint8Array): string {
   return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
 }
 
@@ -471,13 +488,19 @@ export async function collectOrphanedUploads(): Promise<number> {
  * its row failed to, and from a database restored from a backup older than the
  * files beside it. Nothing swept for them before `db:gc`.
  *
- * The scan lives here because `CHARACTER_DIR` and `IMAGE_DIR` do — where the files
+ * The scan lives here because the three upload directories do — where the files
  * are kept is this module's business and nobody else's.
  */
 export async function findStrayFiles(): Promise<string[]> {
-  const claimed = new Set(uploads.all().map(uploadPath));
+  const claimed = new Set([
+    ...uploads.all().map(uploadPath),
+    // Templates are rows in a table of their own, and a sweep that walked their
+    // directory without reading it would delete every game master's collection.
+    // Both halves of this belong together, which is why they are one expression.
+    ...templates.all().map((template) => templatePath(template.id)),
+  ]);
   const stray: string[] = [];
-  for (const directory of [CHARACTER_DIR, IMAGE_DIR]) {
+  for (const directory of [CHARACTER_DIR, IMAGE_DIR, TEMPLATE_DIR]) {
     for (const name of await readdir(directory)) {
       const path = join(directory, name);
       if (!claimed.has(path)) stray.push(path);

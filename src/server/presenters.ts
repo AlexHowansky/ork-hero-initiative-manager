@@ -6,7 +6,8 @@
  * other.
  */
 
-import type { CampaignRow, CharacterRow, GameSessionRow, GmRow, PlayerRow } from "../db/types.ts";
+import type { CampaignRow, CharacterRow, GameSessionRow, GmRow, PlayerRow, TemplateRow } from "../db/types.ts";
+import { BUILT_IN_TEMPLATE_ID } from "../lib/templates.ts";
 
 /**
  * A game master as their own console sees them: who they are, and how they have
@@ -27,6 +28,10 @@ export function presentGm(gm: GmRow) {
     cardImagePx: gm.card_image_px,
     // Stored as SQLite's 0 or 1; a boolean is what the browser wants.
     showAllNpcs: gm.show_all_npcs === 1,
+    // NULL is the template this app ships; the browser gets it as an id like any
+    // other, so a `<select>` has one kind of value to hold. This is the only
+    // place that translation happens on the way out.
+    templateId: gm.template_id ?? BUILT_IN_TEMPLATE_ID,
   };
 }
 
@@ -38,6 +43,23 @@ export function presentCampaign(campaign: CampaignRow) {
       ? `/uploads/images/${campaign.card_upload_id}`
       : null,
     createdAt: campaign.created_at,
+  };
+}
+
+/**
+ * One of a game master's export templates, as their settings drawer lists it.
+ *
+ * `builtIn` rather than an absent id, so the list the drawer holds is one shape
+ * throughout: the template this app ships is a row like any other, and the only
+ * one that says it cannot be deleted.
+ */
+export function presentTemplate(template: TemplateRow) {
+  return {
+    id: template.id,
+    name: template.name,
+    builtIn: false,
+    originalName: template.original_name,
+    createdAt: template.created_at,
   };
 }
 

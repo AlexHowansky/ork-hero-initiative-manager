@@ -15,7 +15,8 @@ import { gms } from "../src/db/queries.ts";
 import { db } from "../src/db/index.ts";
 import { CARD_IMAGE_PX } from "../src/lib/cards.ts";
 import { config, limits } from "../src/lib/config.ts";
-import { hdcBytes, hdcFile, rulesAvailable, unique } from "./helpers.ts";
+import { hdcBytes, hdcFile, hdeFile, hdeSource, rulesAvailable, unique } from "./helpers.ts";
+import { BUILT_IN_TEMPLATE_ID } from "../src/lib/templates.ts";
 import {
   LOG_CLEARED,
   SESSION_STARTED,
@@ -364,6 +365,40 @@ describe("character sheets reach only the right people", () => {
     // The game master sees everything in their own campaign.
     expect(await status(npc.id, gm.cookie)).toBe(200);
   });
+
+  test.skipIf(!rulesAvailable)(
+    "is drawn through the template of the game master who owns it, not the reader's",
+    async () => {
+      const { gm, alice, pc } = await table();
+
+      // The game master chooses a template of their own. The player has no such
+      // setting — no account to keep one on — so if the sheet were drawn through
+      // the *requester's* template they would silently get the built-in, and two
+      // people looking at one character would see two different sheets.
+      const form = new FormData();
+      form.set("template", hdeFile("mine.hde", { name: "Mine", marker: "the-gm-chose-this" }));
+      const { template } = await (
+        await fetch(`${base}/api/templates`, authed(gm.cookie, { method: "POST", body: form }))
+      ).json();
+      await fetch(`${base}/api/settings`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Origin: base, Cookie: gm.cookie },
+        body: JSON.stringify({ templateId: template.id }),
+      });
+
+      const asPlayer = await (
+        await fetch(`${base}/characters/${pc.id}`, { headers: { Cookie: alice } })
+      ).text();
+      const asGm = await (
+        await fetch(`${base}/characters/${pc.id}`, { headers: { Cookie: gm.cookie } })
+      ).text();
+
+      expect(asPlayer).toContain("the-gm-chose-this");
+      expect(asGm).toContain("the-gm-chose-this");
+      // The same sheet for both, which is the whole of what this is about.
+      expect(asPlayer).toBe(asGm);
+    },
+  );
 
   test.skipIf(!rulesAvailable)("a sheet is served into an opaque origin", async () => {
     const gm = await signIn();
@@ -3148,6 +3183,140 @@ describe("a game master's own settings", () => {
     // A player is signed in, but not as an account — there is no row of theirs
     // for a setting to live on.
     expect((await patch(player, { cardImagePx: 320 })).status).toBe(401);
+  });
+});
+
+describe("a game master's export templates", () => {
+  const list = async (cookie: string) =>
+    await (await fetch(`${base}/api/templates`, authed(cookie))).json();
+
+  const upload = (cookie: string | null, file: File) => {
+    const form = new FormData();
+    form.set("template", file);
+    return fetch(`${base}/api/templates`, {
+      method: "POST",
+      headers: { Origin: base, ...(cookie ? { Cookie: cookie } : {}) },
+      body: form,
+    });
+  };
+
+  const remove = (cookie: string | null, id: string) =>
+    fetch(`${base}/api/templates/${id}`, {
+      method: "DELETE",
+      headers: { Origin: base, ...(cookie ? { Cookie: cookie } : {}) },
+    });
+
+  const patch = (cookie: string, body: unknown) =>
+    fetch(`${base}/api/settings`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Origin: base, Cookie: cookie },
+      body: JSON.stringify(body),
+    });
+
+  test("a new account has the built-in and nothing else", async () => {
+    const { cookie } = await signIn();
+
+    const { templates } = await list(cookie);
+    expect(templates).toHaveLength(1);
+    expect(templates[0]).toMatchObject({ id: BUILT_IN_TEMPLATE_ID, builtIn: true });
+
+    // And it is what their sheets are drawn through, said in the identity so the
+    // console has it before its first render.
+    const me = await (await fetch(`${base}/api/auth/me`, authed(cookie))).json();
+    expect(me.gm.templateId).toBe(BUILT_IN_TEMPLATE_ID);
+  });
+
+  test("an uploaded template joins the list and can be chosen", async () => {
+    const { cookie } = await signIn();
+
+    const created = await upload(cookie, hdeFile("mine.hde", { name: "Mine" }));
+    expect(created.status).toBe(201);
+    const { template, replaced } = await created.json();
+    expect(replaced).toBe(false);
+    expect(template.name).toBe("Mine");
+
+    expect((await list(cookie)).templates).toHaveLength(2);
+
+    const chosen = await patch(cookie, { templateId: template.id });
+    expect(chosen.status).toBe(200);
+    expect((await chosen.json()).settings.templateId).toBe(template.id);
+
+    // And back again, which is the only way to say "the one this app ships".
+    const back = await patch(cookie, { templateId: BUILT_IN_TEMPLATE_ID });
+    expect((await back.json()).settings.templateId).toBe(BUILT_IN_TEMPLATE_ID);
+  });
+
+  test("the same name again updates the one they have", async () => {
+    const { cookie } = await signIn();
+    const first = await (await upload(cookie, hdeFile("v1.hde", { name: "Mine" }))).json();
+
+    const again = await upload(cookie, hdeFile("v2.hde", { name: "Mine" }));
+
+    // 200 rather than 201: the same template, exported again, and saying
+    // "created" about it would be untrue.
+    expect(again.status).toBe(200);
+    const { template, replaced } = await again.json();
+    expect(replaced).toBe(true);
+    expect(template.id).toBe(first.template.id);
+    expect((await list(cookie)).templates).toHaveLength(2);
+  });
+
+  test("a file that is not a template is refused", async () => {
+    const { cookie } = await signIn();
+
+    const response = await upload(cookie, new File([hdeSource()], "notes.txt"));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error.message).toMatch(/\.hde/);
+    expect((await list(cookie)).templates).toHaveLength(1);
+  });
+
+  test("the one in use cannot be deleted, and the built-in never can", async () => {
+    const { cookie } = await signIn();
+    const { template } = await (await upload(cookie, hdeFile("mine.hde"))).json();
+    await patch(cookie, { templateId: template.id });
+
+    const refused = await remove(cookie, template.id);
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error.message).toMatch(/Choose another one first/);
+
+    expect((await remove(cookie, BUILT_IN_TEMPLATE_ID)).status).toBe(409);
+
+    // Switching away is what makes it deletable, which is the one press the
+    // message asks for.
+    await patch(cookie, { templateId: BUILT_IN_TEMPLATE_ID });
+    expect((await remove(cookie, template.id)).status).toBe(204);
+    expect((await list(cookie)).templates).toHaveLength(1);
+  });
+
+  test("one game master's collection is not another's", async () => {
+    const mine = await signIn();
+    const stranger = await signIn();
+    const { template } = await (await upload(mine.cookie, hdeFile("mine.hde"))).json();
+
+    // Not in their list, not theirs to choose, and not theirs to delete — and
+    // all three said as "not found", so an id reveals nothing about what exists.
+    expect((await list(stranger.cookie)).templates).toHaveLength(1);
+    expect((await patch(stranger.cookie, { templateId: template.id })).status).toBe(404);
+    expect((await remove(stranger.cookie, template.id)).status).toBe(404);
+
+    // And nothing of theirs changed while they tried.
+    const me = await (await fetch(`${base}/api/auth/me`, authed(stranger.cookie))).json();
+    expect(me.gm.templateId).toBe(BUILT_IN_TEMPLATE_ID);
+  });
+
+  test("a template that does not exist is not found", async () => {
+    const { cookie } = await signIn();
+    expect((await patch(cookie, { templateId: "no-such-template" })).status).toBe(404);
+    expect((await remove(cookie, "no-such-template")).status).toBe(404);
+  });
+
+  test("none of it is reachable without signing in as a game master", async () => {
+    const { cookie } = await signIn();
+    const { template } = await (await upload(cookie, hdeFile("mine.hde"))).json();
+
+    expect((await fetch(`${base}/api/templates`)).status).toBe(401);
+    expect((await upload(null, hdeFile("theirs.hde"))).status).toBe(401);
+    expect((await remove(null, template.id)).status).toBe(401);
   });
 });
 

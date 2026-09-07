@@ -17,13 +17,20 @@
  */
 
 import { useCallback, useSyncExternalStore } from "react";
+import { BUILT_IN_TEMPLATE_ID } from "../lib/templates.ts";
 
 export interface GmSettings {
   /** Whether the session library reaches past the session's own campaign. */
   showAllNpcs: boolean;
+  /**
+   * The export template their character sheets are drawn through. The one this
+   * app ships travels under its own id rather than as a null, so the drawer's
+   * `<select>` has one kind of value to hold.
+   */
+  templateId: string;
 }
 
-const DEFAULTS: GmSettings = { showAllNpcs: false };
+const DEFAULTS: GmSettings = { showAllNpcs: false, templateId: BUILT_IN_TEMPLATE_ID };
 
 let current: GmSettings = DEFAULTS;
 

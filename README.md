@@ -59,11 +59,11 @@ putting a password in your shell history and the process list. Changing a
 password signs out every browser that account was signed in on.
 
 `db:gc` sweeps upload wreckage in both directions: rows nothing references any
-more, and files under `data/uploads/` that no row claims. `--dry-run` counts
-them without deleting. Deleting a game master or a character already collects
-the first kind on the way out, so a run that finds anything is cleaning up after
-an interrupted upload or a database restored from a backup older than the files
-beside it.
+more, and files under `data/uploads/` — characters, images and export templates
+alike — that no row claims. `--dry-run` counts them without deleting. Deleting a
+game master or a character already collects the first kind on the way out, so a
+run that finds anything is cleaning up after an interrupted upload or a database
+restored from a backup older than the files beside it.
 
 ## How it fits together
 
@@ -958,16 +958,29 @@ rather than leaving it to be discovered mid-session — and the tests that need 
 skip rather than fail, since it cannot be in CI either.
 
 **The sheet is rendered, not stored.** What a game master or a player opens is
-built from the character file on request, by applying this table's export
-template — `assets/Ork-16x9.hde`, from
-[Ork HERO Templates](https://github.com/AlexHowansky/ork-hero-templates) — to the
+built from the character file on request, by applying an export template to the
 stored `.hdc`. Nothing caches the result. Re-export a character, drop the file
 back, and the next person to open it sees the new sheet, with nothing to
 invalidate: the file *is* the character, and the sheet is what that character
 looks like through today's template and today's rules.
 
+**The template is the game master's own.** Each keeps their own collection of
+`.hde` files, uploaded and chosen from `Template` in the settings drawer, and
+each collection is private to the account that filed it. The one this app ships —
+`assets/Ork-16x9.hde`, from
+[Ork HERO Templates](https://github.com/AlexHowansky/ork-hero-templates) — is
+always the first row of that list and cannot be deleted, so a game master who has
+uploaded nothing still has working sheets and so does one who has removed
+everything they uploaded. A sheet is drawn through the template of the game
+master who *owns* the character rather than the one reading it, so a player and
+their game master looking at the same character see the same page. Uploading a
+template under a name that collection already has is that template being updated:
+the row keeps its id, so re-exporting the one you are using does not cost you the
+choice. The template in use cannot be deleted until another is chosen.
+
 It costs about 30ms once the rules and the template are read, which they are once
-per process rather than once per request. What is never held is the HTML they
+per process rather than once per request — the rules once for the deployment, and
+each template once. What is never held is the HTML they
 produce. Rendering runs with the library's strict mode **off**: in strict mode
 anything the renderer cannot work out stops the render with an explanation, which
 is right for a command line and wrong for a game master who has just clicked a
@@ -1442,8 +1455,9 @@ rather than once for the whole turn.
 ## Character sheets
 
 A sheet is not uploaded and not stored. What is stored is the `.hdc` HERO
-Designer saved; the sheet is built from it on every request, by applying this
-table's export template (`assets/Ork-16x9.hde`) to the file. Nothing caches the
+Designer saved; the sheet is built from it on every request, by applying the
+owning game master's export template to the file — the one this app ships
+(`assets/Ork-16x9.hde`) until they upload and choose another. Nothing caches the
 result, so re-exporting a character and dropping the file back is the whole of
 keeping their sheet current.
 

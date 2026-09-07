@@ -16,9 +16,10 @@ import type { BunRequest } from "bun";
 import { handler, json, type RequestContext } from "../http.ts";
 import { parseJsonBody, schemas } from "../../lib/validate.ts";
 import { requireGm } from "../middleware/auth.ts";
-import { gms, sessionCharacters } from "../../db/queries.ts";
+import { gms, sessionCharacters, templates } from "../../db/queries.ts";
 import { errors } from "../../lib/errors.ts";
 import { presentGm } from "../presenters.ts";
+import { BUILT_IN_TEMPLATE_ID } from "../../lib/templates.ts";
 
 export const settingsRoutes = {
   "/api/settings": {
@@ -44,7 +45,24 @@ export const settingsRoutes = {
         }
       }
 
-      gms.update(gm.id, changes);
+      // The built-in is stored as no choice at all, which is what it is; anything
+      // else has to be one of this game master's own, since an id is the only
+      // thing a request carries and one from somebody else's collection would
+      // otherwise render their sheets through a stranger's template.
+      let templateId: string | null | undefined;
+      if (changes.templateId !== undefined) {
+        if (changes.templateId === BUILT_IN_TEMPLATE_ID) {
+          templateId = null;
+        } else {
+          const template = templates.byId(changes.templateId);
+          if (!template || template.gm_id !== gm.id) {
+            throw errors.notFound("We couldn't find that export template.");
+          }
+          templateId = template.id;
+        }
+      }
+
+      gms.update(gm.id, { ...changes, templateId });
       logger.info("gm settings changed", { gmId: gm.id, fields: Object.keys(changes) });
 
       // What was actually saved, read back rather than echoed: a field the
