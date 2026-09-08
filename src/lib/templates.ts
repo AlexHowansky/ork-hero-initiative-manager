@@ -10,3 +10,12 @@
  * It cannot collide with a real template: those are UUIDs (`lib/ids.ts`).
  */
 export const BUILT_IN_TEMPLATE_ID = "built-in";
+
+/**
+ * What the built-in is called in the drawer.
+ *
+ * Not the name inside any of the files it stands for — it stands for three, and
+ * which one a sheet gets is the shape of the window rather than anything a game
+ * master chose. So the entry says what it does instead of what it is.
+ */
+export const BUILT_IN_TEMPLATE_NAME = "Automatic";

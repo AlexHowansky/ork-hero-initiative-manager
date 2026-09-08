@@ -27,6 +27,7 @@ import { campaigns, characters, uploads } from "../../db/queries.ts";
 import { uploadPath } from "../uploads.ts";
 import { HDC_MIME, renderSheet } from "../hero-sheet.ts";
 import { templateSourceForGm } from "../templates.ts";
+import { layoutForRatio } from "../../lib/sheetLayout.ts";
 import { log } from "../../lib/log.ts";
 import type { UploadRow } from "../../db/types.ts";
 
@@ -99,10 +100,17 @@ export const fileRoutes = {
 
       let html: string;
       try {
-        // The template belongs to the game master who owns the character, never
-        // to whoever is asking: a player reading their own sheet sees it in the
-        // frame the game master who filed them chose.
-        const template = await templateSourceForGm(campaign.gm_id);
+        // Two different people decide what this sheet looks like, and they are
+        // deliberately different people. *Which* template is the owning game
+        // master's, never the reader's — a player reading their own sheet sees
+        // it in the frame the game master who filed them chose. What *shape* of
+        // it is the reader's own window, which is what the browser reports here.
+        //
+        // Anything that is not a ratio — absent, junk, a hand-typed query — is
+        // the widescreen layout, which is what every caller got before this
+        // existed. A query string is never a reason to refuse a character sheet.
+        const asked = Number(new URL(request.url).searchParams.get("ratio"));
+        const template = await templateSourceForGm(campaign.gm_id, layoutForRatio(asked));
         html = await renderSheet(new Uint8Array(await file.arrayBuffer()), upload, template);
       } catch (error) {
         // Not a 404, which everything above it is: those say "this is not yours

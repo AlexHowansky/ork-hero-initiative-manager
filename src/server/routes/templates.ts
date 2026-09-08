@@ -16,8 +16,8 @@ import { handler, json, noContent, type RequestContext } from "../http.ts";
 import { errors } from "../../lib/errors.ts";
 import { requireGm } from "../middleware/auth.ts";
 import { templates } from "../../db/queries.ts";
-import { BUILT_IN_TEMPLATE_ID } from "../../lib/templates.ts";
-import { builtInName, deleteTemplate, storeTemplate } from "../templates.ts";
+import { BUILT_IN_TEMPLATE_ID, BUILT_IN_TEMPLATE_NAME } from "../../lib/templates.ts";
+import { deleteTemplate, storeTemplate } from "../templates.ts";
 import { fileField, requireTotalWithinLimit } from "../uploads.ts";
 import { presentTemplate } from "../presenters.ts";
 import type { GmRow } from "../../db/types.ts";
@@ -43,9 +43,12 @@ export const templateRoutes = {
           // row cannot be taken away is a list nobody can empty by accident.
           {
             id: BUILT_IN_TEMPLATE_ID,
-            name: await builtInName(),
+            name: BUILT_IN_TEMPLATE_NAME,
             builtIn: true,
-            originalName: "Ork-16x9.hde",
+            // It is three files, and which one is used is the shape of the
+            // reader's window rather than anything on record — so there is no
+            // one filename to name.
+            originalName: null,
             createdAt: null,
           },
           ...templates.listForGm(gm.id).map(presentTemplate),

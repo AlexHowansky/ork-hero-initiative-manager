@@ -386,11 +386,13 @@ describe("character sheets reach only the right people", () => {
         body: JSON.stringify({ templateId: template.id }),
       });
 
+      // The same shape of window for both, so what is being compared is whose
+      // template was used rather than what shape it was drawn in.
       const asPlayer = await (
-        await fetch(`${base}/characters/${pc.id}`, { headers: { Cookie: alice } })
+        await fetch(`${base}/characters/${pc.id}?ratio=1.7778`, { headers: { Cookie: alice } })
       ).text();
       const asGm = await (
-        await fetch(`${base}/characters/${pc.id}`, { headers: { Cookie: gm.cookie } })
+        await fetch(`${base}/characters/${pc.id}?ratio=1.7778`, { headers: { Cookie: gm.cookie } })
       ).text();
 
       expect(asPlayer).toContain("the-gm-chose-this");
@@ -399,6 +401,31 @@ describe("character sheets reach only the right people", () => {
       expect(asPlayer).toBe(asGm);
     },
   );
+
+  test.skipIf(!rulesAvailable)("is drawn in the shape the reader's window asked for", async () => {
+    const gm = await signIn();
+    const { pc } = await makeTable(gm.cookie);
+
+    const sheetAt = async (query: string) =>
+      await (
+        await fetch(`${base}/characters/${pc.id}${query}`, { headers: { Cookie: gm.cookie } })
+      ).text();
+
+    // A phone upright, a window snapped to half a screen, and a maximised one.
+    expect(await sheetAt("?ratio=0.4620")).toContain("Layout: 9x16");
+    expect(await sheetAt("?ratio=0.8889")).toContain("Layout: 8x9");
+    expect(await sheetAt("?ratio=1.7778")).toContain("Layout: 16x9");
+
+    // No ratio at all is the widescreen layout — what `curl` gets, and what
+    // every caller got before any of this existed.
+    expect(await sheetAt("")).toContain("Layout: 16x9");
+
+    // And so is anything that is not a ratio. A query string somebody typed is
+    // never a reason to refuse a character sheet mid-fight.
+    for (const junk of ["?ratio=", "?ratio=abc", "?ratio=-3", "?ratio=0", "?ratio=1e400"]) {
+      expect(await sheetAt(junk)).toContain("Layout: 16x9");
+    }
+  });
 
   test.skipIf(!rulesAvailable)("a sheet is served into an opaque origin", async () => {
     const gm = await signIn();

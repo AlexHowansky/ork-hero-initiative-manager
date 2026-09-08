@@ -2578,7 +2578,7 @@ describe("the export template a game master's sheets are drawn through", () => {
     await page.waitForFunction(
       () =>
         document.querySelectorAll("#setting-template option").length === 1 &&
-        document.querySelector("#setting-template option")?.textContent === "Ork 16x9",
+        document.querySelector("#setting-template option")?.textContent === "Automatic",
       undefined,
       { timeout: 5000 },
     );
@@ -2598,7 +2598,7 @@ describe("the export template a game master's sheets are drawn through", () => {
     await page.getByText("Added “My Own Layout”.").waitFor({ timeout: 5000 });
     await saved;
     expect(await template.locator("option").allTextContents()).toEqual([
-      "Ork 16x9",
+      "Automatic",
       "My Own Layout",
     ]);
     // Selected, not merely filed.
@@ -2614,7 +2614,7 @@ describe("the export template a game master's sheets are drawn through", () => {
     expect(await remove.isDisabled()).toBe(false);
     await remove.click();
     await page.getByText("Deleted “My Own Layout”.").waitFor({ timeout: 5000 });
-    expect(await template.locator("option").allTextContents()).toEqual(["Ork 16x9"]);
+    expect(await template.locator("option").allTextContents()).toEqual(["Automatic"]);
 
     // And the choice is the account's rather than the page's.
     await page.reload();
@@ -2764,6 +2764,23 @@ describe.skipIf(!rulesAvailable)("a real export, filed the way a game master fil
     // And the sheet is drawn from the stored file, on demand.
     await page.getByRole("button", { name: `View ${name}'s sheet` }).click();
     const sheet = page.frameLocator("iframe");
+    await sheet.locator("text=Redshift").first().waitFor({ timeout: 10_000 });
+
+    // In the shape of the window it is being read in. The viewport is wide, so
+    // this is the widescreen layout — the address says which was asked for, and
+    // the banner the template writes says which was drawn.
+    const wide = await page.locator("iframe").getAttribute("src");
+    expect(wide).toMatch(/\?ratio=1\.\d+$/);
+    expect(await sheet.locator("body").innerHTML()).toBeTruthy();
+
+    // Turned upright — a phone, or a tablet on its end. The sheet is re-drawn
+    // through the layout for that shape, which is the whole of `Automatic`.
+    await page.setViewportSize({ width: 420, height: 900 });
+    await page.waitForFunction(
+      () => (document.querySelector("iframe") as HTMLIFrameElement | null)?.src.includes("ratio=0."),
+      undefined,
+      { timeout: 5000 },
+    );
     await sheet.locator("text=Redshift").first().waitFor({ timeout: 10_000 });
 
     await page.close();

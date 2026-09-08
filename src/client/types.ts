@@ -120,7 +120,8 @@ export interface TemplateSummary {
   id: string;
   name: string;
   builtIn: boolean;
-  originalName: string;
+  /** The file it was uploaded as; null for the built-in, which is three files. */
+  originalName: string | null;
   createdAt: string | null;
 }
 

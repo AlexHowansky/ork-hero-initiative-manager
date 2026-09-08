@@ -13,6 +13,7 @@
 import { describe, expect, test } from "bun:test";
 import { imageFromHdc, parseHdc, renderSheet, statsFromHdc, withoutImage } from "../src/server/hero-sheet.ts";
 import { builtInSource } from "../src/server/templates.ts";
+import { SHEET_LAYOUTS } from "../src/lib/sheetLayout.ts";
 import { hdcBytes, hdeSource, rulesAvailable } from "./helpers.ts";
 import type { UploadRow } from "../src/db/types.ts";
 
@@ -135,7 +136,7 @@ describe.skipIf(!rulesAvailable)("rendering the sheet", () => {
     const html = await renderSheet(
       withoutImage(await redshift()),
       upload(),
-      await builtInSource(),
+      await builtInSource("16x9"),
     );
 
     // The marker the template stamps on everything it writes — which used to be
@@ -147,6 +148,20 @@ describe.skipIf(!rulesAvailable)("rendering the sheet", () => {
     // The characteristics table the sheet is built around.
     expect(html).toContain("STUN");
     expect(html).toContain("Lightning Reflexes");
+  });
+
+  test("draws the same character in whichever shape the window asked for", async () => {
+    const character = withoutImage(await redshift());
+
+    // The three the app ships. Each stamps its own layout into the banner comment
+    // at the top of every sheet it draws, so this is the assertion that the files
+    // are three real templates rather than three copies of one — and that the
+    // layout a reader is handed is the one they asked for.
+    for (const layout of SHEET_LAYOUTS) {
+      const html = await renderSheet(character, upload(), await builtInSource(layout));
+      expect(html).toContain(`Layout: ${layout}`);
+      expect(html).toContain("Redshift");
+    }
   });
 
   test("draws the character through whatever template it is handed", async () => {
@@ -170,7 +185,7 @@ describe.skipIf(!rulesAvailable)("rendering the sheet", () => {
     const html = await renderSheet(
       withoutImage(await redshift()),
       upload("Redshift v4.hdc"),
-      await builtInSource(),
+      await builtInSource("16x9"),
     );
 
     // The file on disk is named after its row and its modification time is
@@ -182,9 +197,9 @@ describe.skipIf(!rulesAvailable)("rendering the sheet", () => {
     const html = await renderSheet(
       withoutImage(await redshift()),
       upload(),
-      await builtInSource(),
+      await builtInSource("16x9"),
     );
-    const withPicture = await renderSheet(await redshift(), upload(), await builtInSource());
+    const withPicture = await renderSheet(await redshift(), upload(), await builtInSource("16x9"));
 
     // The same sheet either way, minus a megabyte and a half of base64.
     expect(html.length).toBeLessThan(withPicture.length / 10);
@@ -196,7 +211,7 @@ describe.skipIf(!rulesAvailable)("rendering the sheet", () => {
     const html = await renderSheet(
       hdcBytes({ name: "Sparse" }),
       upload("Sparse.hdc"),
-      await builtInSource(),
+      await builtInSource("16x9"),
     );
     expect(html).toContain("Sparse");
   });

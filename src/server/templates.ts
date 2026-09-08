@@ -16,6 +16,7 @@
 import { unlink } from "node:fs/promises";
 import { resolve } from "node:path";
 import { BUILT_IN_TEMPLATE_ID } from "../lib/templates.ts";
+import { SHEET_LAYOUTS, type SheetLayout } from "../lib/sheetLayout.ts";
 import { errors } from "../lib/errors.ts";
 import { limits } from "../lib/config.ts";
 import { log } from "../lib/log.ts";
@@ -26,19 +27,28 @@ import { parseHde } from "./hero-sheet.ts";
 import { readUploadedFile, safeOriginalName, sha256, templatePath } from "./uploads.ts";
 
 /**
- * The template this app ships, from the Ork HERO Templates project.
+ * The template this app ships, from the Ork HERO Templates project, in each of
+ * the shapes it comes in.
  *
  * It is what the cards, the player screen and the sheet overlay were all
  * designed around, so it stays the default and cannot be deleted — a game master
  * with no templates of their own still has working sheets, and one who deletes
- * every upload does too.
+ * every upload does too. Which of the three a sheet is drawn through is not a
+ * setting but the shape of the window it is being read in; see `lib/sheetLayout`.
  */
-const BUILT_IN_PATH = resolve(import.meta.dir, "../../assets/Ork-16x9.hde");
+const BUILT_IN_PATHS: Record<SheetLayout, string> = {
+  "16x9": resolve(import.meta.dir, "../../assets/Ork-16x9.hde"),
+  "8x9": resolve(import.meta.dir, "../../assets/Ork-8x9.hde"),
+  "9x16": resolve(import.meta.dir, "../../assets/Ork-9x16.hde"),
+};
 
 /**
  * Template sources, read once each and held.
  *
- * Keyed by template id, with the built-in under its own sentinel. Rendering
+ * Keyed by template id, with each shape of the built-in under its own sentinel
+ * key (`built-in:16x9`) — so `forgetTemplate`, which takes a row id, can never
+ * name one of them, which is right: a file that ships with the app does not
+ * change under a running server. Rendering
  * happens on every request and a template is 45 KB of HTML to parse, so this is
  * the same saving the single memoised promise it replaces was making — and the
  * bound is the number of templates on the instance, which is a game master's own
@@ -67,22 +77,23 @@ export function forgetTemplate(id: string): void {
   sources.delete(id);
 }
 
-/** The source of the template this app ships. */
-export function builtInSource(): Promise<string> {
-  return sourceAt(BUILT_IN_TEMPLATE_ID, BUILT_IN_PATH);
+/** The source of the template this app ships, in the shape asked for. */
+export function builtInSource(layout: SheetLayout): Promise<string> {
+  return sourceAt(`${BUILT_IN_TEMPLATE_ID}:${layout}`, BUILT_IN_PATHS[layout]);
 }
 
-/** What the built-in template calls itself, for the list a game master picks from. */
-export async function builtInName(): Promise<string> {
-  try {
-    return parseHde(await builtInSource(), "Ork-16x9.hde").name || "Built-in";
-  } catch (error) {
-    // It ships with the app, so this is a broken install rather than anything a
-    // game master did. The list is still worth showing.
-    log.warn("could not read the built-in export template", { error });
-    return "Built-in";
-  }
-}
+/**
+ * Every shape of the built-in, read before the first request.
+ *
+ * They ship with the app, so a running server can no more be handed a new one
+ * than it can a new component — the same reasoning as the card art in
+ * `routes/frames.ts`, and the same treatment. Doing it here rather than lazily
+ * is about *when* a broken install is discovered: read on demand, a missing
+ * `Ork-9x16.hde` is found by the first player who turns a phone sideways, as a
+ * 500 that tells them to re-export their character. Read now, it is found by
+ * whoever started the server.
+ */
+await Promise.all(SHEET_LAYOUTS.map((layout) => builtInSource(layout)));
 
 /**
  * The template a character's sheet should be drawn through.
@@ -96,9 +107,9 @@ export async function builtInName(): Promise<string> {
  * right character in the wrong frame, and the warning is where an operator can
  * act on it.
  */
-export async function templateSourceForGm(gmId: string): Promise<string> {
+export async function templateSourceForGm(gmId: string, layout: SheetLayout): Promise<string> {
   const templateId = gms.byId(gmId)?.template_id ?? null;
-  if (templateId === null) return await builtInSource();
+  if (templateId === null) return await builtInSource(layout);
 
   const row = templates.byId(templateId);
   if (row) {
@@ -110,7 +121,7 @@ export async function templateSourceForGm(gmId: string): Promise<string> {
   } else {
     log.warn("a game master's export template is no longer on file", { gmId, templateId });
   }
-  return await builtInSource();
+  return await builtInSource(layout);
 }
 
 /**

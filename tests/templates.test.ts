@@ -12,7 +12,6 @@ import { describe, expect, test } from "bun:test";
 import { unlink } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import {
-  builtInName,
   builtInSource,
   deleteTemplate,
   deleteTemplatesForGm,
@@ -30,6 +29,7 @@ import {
 import { gms, templates } from "../src/db/queries.ts";
 import { limits } from "../src/lib/config.ts";
 import { hdcBytes, hdeFile, hdeSource, makeGm } from "./helpers.ts";
+import { SHEET_LAYOUTS } from "../src/lib/sheetLayout.ts";
 
 describe("filing an export template", () => {
   test("is kept where templates are kept, under a generated name", async () => {
@@ -156,15 +156,15 @@ describe("a collection is one game master's own", () => {
     const gm = makeGm();
     const { template } = await storeTemplate(gm.id, hdeFile("v1.hde", { marker: "before" }));
     gms.update(gm.id, { templateId: template.id });
-    expect(await templateSourceForGm(gm.id)).toContain("before");
+    expect(await templateSourceForGm(gm.id, "16x9")).toContain("before");
 
     await storeTemplate(gm.id, hdeFile("v2.hde", { marker: "after" }));
 
     // The cache is per template rather than per process, so a replaced file has
     // to be forgotten — otherwise every sheet would go on being drawn through
     // the version that was replaced until the server restarted.
-    expect(await templateSourceForGm(gm.id)).toContain("after");
-    expect(await templateSourceForGm(gm.id)).not.toContain("before");
+    expect(await templateSourceForGm(gm.id, "16x9")).toContain("after");
+    expect(await templateSourceForGm(gm.id, "16x9")).not.toContain("before");
   });
 });
 
@@ -173,10 +173,31 @@ describe("which template a sheet is drawn through", () => {
     const gm = makeGm();
 
     expect(gms.byId(gm.id)!.template_id).toBeNull();
-    expect(await templateSourceForGm(gm.id)).toBe(await builtInSource());
-    // And it has a name of its own for the list, read from the file rather than
-    // written down here.
-    expect(await builtInName()).toBe("Ork 16x9");
+    expect(await templateSourceForGm(gm.id, "16x9")).toBe(await builtInSource("16x9"));
+  });
+
+  test("is whichever shape of the built-in the reader's window asks for", async () => {
+    const gm = makeGm();
+
+    // Three files, one entry. Each says which layout it is in the banner comment
+    // it writes into every sheet drawn through it, which is how a test — and a
+    // reader looking at a sheet — can tell them apart.
+    for (const layout of SHEET_LAYOUTS) {
+      expect(await templateSourceForGm(gm.id, layout)).toContain(`Layout: ${layout}`);
+    }
+  });
+
+  test("but a game master's own template is their own whatever shape the window is", async () => {
+    const gm = makeGm();
+    const { template } = await storeTemplate(gm.id, hdeFile("mine.hde", { marker: "mine-only" }));
+    gms.update(gm.id, { templateId: template.id });
+
+    // Automatic is a property of the built-in alone: a template somebody
+    // uploaded is the one they uploaded, and nothing here second-guesses its
+    // layout.
+    for (const layout of SHEET_LAYOUTS) {
+      expect(await templateSourceForGm(gm.id, layout)).toContain("mine-only");
+    }
   });
 
   test("is theirs once they have chosen one", async () => {
@@ -184,7 +205,7 @@ describe("which template a sheet is drawn through", () => {
     const { template } = await storeTemplate(gm.id, hdeFile("mine.hde", { marker: "mine-only" }));
     gms.update(gm.id, { templateId: template.id });
 
-    expect(await templateSourceForGm(gm.id)).toContain("mine-only");
+    expect(await templateSourceForGm(gm.id, "16x9")).toContain("mine-only");
   });
 
   test("falls back to the built-in when the file behind it has gone", async () => {
@@ -200,12 +221,12 @@ describe("which template a sheet is drawn through", () => {
 
     // Every character at that table being unopenable is a worse answer than the
     // right character in the wrong frame.
-    expect(await templateSourceForGm(gm.id)).toBe(await builtInSource());
+    expect(await templateSourceForGm(gm.id, "16x9")).toBe(await builtInSource("16x9"));
 
     // And the failed read is not remembered as the answer, or one missing file
     // would cost that game master their template until the server restarted.
     await Bun.write(templatePath(template.id), hdeSource({ marker: "gone" }));
-    expect(await templateSourceForGm(gm.id)).toContain("gone");
+    expect(await templateSourceForGm(gm.id, "16x9")).toContain("gone");
   });
 
   test("falls back when the row itself has gone", async () => {
@@ -214,7 +235,7 @@ describe("which template a sheet is drawn through", () => {
     gms.update(gm.id, { templateId: template.id });
     templates.remove(template.id);
 
-    expect(await templateSourceForGm(gm.id)).toBe(await builtInSource());
+    expect(await templateSourceForGm(gm.id, "16x9")).toBe(await builtInSource("16x9"));
   });
 });
 

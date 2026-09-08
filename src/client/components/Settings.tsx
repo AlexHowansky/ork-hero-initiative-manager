@@ -379,7 +379,7 @@ function Template({ open }: { open: boolean }) {
           <ul className="space-y-1">
             {mine.map((template) => (
               <li key={template.id} className="flex items-center justify-between gap-2">
-                <span className="truncate text-xs" title={template.originalName}>
+                <span className="truncate text-xs" title={template.originalName ?? undefined}>
                   {template.name}
                 </span>
                 <IconButton

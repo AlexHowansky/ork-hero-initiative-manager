@@ -966,21 +966,45 @@ looks like through today's template and today's rules.
 
 **The template is the game master's own.** Each keeps their own collection of
 `.hde` files, uploaded and chosen from `Template` in the settings drawer, and
-each collection is private to the account that filed it. The one this app ships —
-`assets/Ork-16x9.hde`, from
-[Ork HERO Templates](https://github.com/AlexHowansky/ork-hero-templates) — is
-always the first row of that list and cannot be deleted, so a game master who has
-uploaded nothing still has working sheets and so does one who has removed
+each collection is private to the account that filed it. The entry this app ships
+is always the first row of that list and cannot be deleted, so a game master who
+has uploaded nothing still has working sheets and so does one who has removed
 everything they uploaded. A sheet is drawn through the template of the game
-master who *owns* the character rather than the one reading it, so a player and
-their game master looking at the same character see the same page. Uploading a
-template under a name that collection already has is that template being updated:
-the row keeps its id, so re-exporting the one you are using does not cost you the
-choice. The template in use cannot be deleted until another is chosen.
+master who *owns* the character rather than the one reading it, so which template
+a player sees is never their own. Uploading a template under a name that
+collection already has is that template being updated: the row keeps its id, so
+re-exporting the one you are using does not cost you the choice. The template in
+use cannot be deleted until another is chosen.
+
+**The one it ships with picks its own shape.** That entry is called `Automatic`,
+and it stands for three templates rather than one — `assets/Ork-16x9.hde`,
+`Ork-8x9.hde` and `Ork-9x16.hde`, all from
+[Ork HERO Templates](https://github.com/AlexHowansky/ork-hero-templates) — for a
+maximised widescreen window, a window snapped to half of one, and a phone held
+upright. Which of them draws a given sheet is not a setting, because it is not a
+preference: it is the shape of the window that sheet is being read in. So the
+browser reports that shape (`?ratio=`, measured off the sheet's own box) and the
+server picks, at boundaries that are the *geometric* means of the three ratios —
+0.7071 and 1.2571 — since the midpoint of two ratios is the one the same factor
+from both, not the same distance. A request with no ratio, or a nonsense one, gets
+the widescreen layout; a query string is never a reason to refuse somebody a
+character sheet mid-fight. `Automatic` is a property of that entry alone: a
+template a game master uploaded is used exactly as uploaded, whatever shape their
+window is.
+
+Which means a player on a phone and their game master on a monitor see the same
+character through the same template in two different layouts — the same sheet,
+laid out for the screen each of them is holding. An open sheet follows its window,
+too: turn a tablet over and it is re-drawn in the other layout. Only at a
+boundary, and only once the window has clearly settled past it, so dragging a
+window across a monitor costs nothing and a phone's URL bar sliding in and out
+cannot reload a sheet somebody is reading.
 
 It costs about 30ms once the rules and the template are read, which they are once
 per process rather than once per request — the rules once for the deployment, and
-each template once. What is never held is the HTML they
+each template once, the three shipped ones before the first request arrives so
+that a broken install is something the operator finds at startup rather than
+something a player finds mid-session. What is never held is the HTML they
 produce. Rendering runs with the library's strict mode **off**: in strict mode
 anything the renderer cannot work out stops the render with an explanation, which
 is right for a command line and wrong for a game master who has just clicked a
@@ -1456,10 +1480,11 @@ rather than once for the whole turn.
 
 A sheet is not uploaded and not stored. What is stored is the `.hdc` HERO
 Designer saved; the sheet is built from it on every request, by applying the
-owning game master's export template to the file — the one this app ships
-(`assets/Ork-16x9.hde`) until they upload and choose another. Nothing caches the
-result, so re-exporting a character and dropping the file back is the whole of
-keeping their sheet current.
+owning game master's export template to the file — `Automatic`, the entry this app
+ships, until they upload and choose another. Nothing caches the result, so
+re-exporting a character and dropping the file back is the whole of keeping their
+sheet current, and `Automatic` means the shape it comes out in follows the window
+it is opened in.
 
 The stored file is kept as it arrived, with one exception: when the picture
 inside it becomes the character's card, that picture is taken back out
