@@ -5,7 +5,6 @@
  * other module reads `process.env` directly.
  */
 
-import { defaultRulesDirectory } from "ork-hero-export-renderer";
 import { CARD_IMAGE_PX } from "./cards.ts";
 
 function bool(value: string | undefined, fallback = false): boolean {
@@ -137,14 +136,14 @@ export const config = {
    * against the game system's own data. That data is Hero Games' copyrighted
    * material and so is not distributed with the renderer or with this app: an
    * operator extracts it from their own copy of HERO Designer with
-   * `bunx ork-hero-extract-rules /path/to/HD6.jar`, which by default writes it
-   * where the fallback below looks.
+   * `bunx ork-hero-extract-rules /path/to/HD6.jar`, which by default writes to
+   * `./rules` — the same directory this falls back to.
    *
    * Without it no sheet can be rendered and no characteristic can be read off an
    * upload, so `server/index.ts` says so at startup rather than leaving it to be
    * discovered mid-session.
    */
-  heroRulesDir: process.env.HERO_RULES_DIR ?? defaultRulesDirectory(),
+  heroRulesDir: process.env.HERO_RULES_DIR ?? "./rules",
   logLevel: logLevel(process.env.LOG_LEVEL),
   /** Development escape hatch: serve cookies without the Secure flag over plain HTTP. */
   insecureCookies: bool(process.env.INSECURE_COOKIES),
