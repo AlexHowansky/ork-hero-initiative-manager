@@ -1610,7 +1610,7 @@ location / {
     add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
     add_header Content-Security-Policy   "frame-ancestors 'none'" always;
 
-    client_max_body_size 10m;   # matching UPLOAD_LIMIT_BYTES
+    client_max_body_size 1m;    # matching UPLOAD_LIMIT_BYTES
 }
 ```
 

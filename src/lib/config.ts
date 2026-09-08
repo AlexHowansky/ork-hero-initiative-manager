@@ -204,10 +204,16 @@ export const limits = {
    * two at once holds their total to it as well (`requireTotalWithinLimit`), so a
    * proxy in front can be sized to this number and not to a multiple of it.
    *
+   * A megabyte is generous for what actually arrives: the browser lifts the
+   * portrait out of a character file and scales it to card size before uploading
+   * (`client/hdc.ts`), so a 3.7 MB file crosses the wire as tens of kilobytes.
+   * The headroom is for the paths that skip that — the API, or a browser whose
+   * fallback hands the file over whole.
+   *
    * Clamped to something a request can plausibly carry — below 64 KB no real
    * sheet fits, and past 512 MB the proxy in front will refuse it first.
    */
-  uploadBytes: whole(process.env.UPLOAD_LIMIT_BYTES, 10 * 1024 * 1024, 64 * 1024, 512 * 1024 * 1024),
+  uploadBytes: whole(process.env.UPLOAD_LIMIT_BYTES, 1024 * 1024, 64 * 1024, 512 * 1024 * 1024),
   /**
    * The shorter side a stored image is scaled down to.
    *
