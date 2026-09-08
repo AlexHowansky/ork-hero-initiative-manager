@@ -26,7 +26,7 @@ for (const warning of configWarnings) log.warn("configuration ignored", { detail
 if (!(await Bun.file(join(config.heroRulesDir, "manifest.json")).exists())) {
   log.warn("no HERO rules data; character sheets cannot be rendered", {
     directory: config.heroRulesDir,
-    remedy: "run `bunx extract-rules /path/to/HD6.jar`, or set HERO_RULES_DIR",
+    remedy: "run `bunx ork-hero-extract-rules /path/to/HD6.jar`, or set HERO_RULES_DIR",
   });
 }
 

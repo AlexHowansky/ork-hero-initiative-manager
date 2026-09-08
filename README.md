@@ -16,10 +16,10 @@ database file, no external services.
 
 ```bash
 bun install
-bunx extract-rules /path/to/HD6.jar   # the HERO game rules; see below
-cp .env.example .env                  # then edit it
+bunx ork-hero-extract-rules /path/to/HD6.jar   # the HERO game rules; see below
+cp .env.example .env                           # then edit it
 bun run cli gm:add --email you@example.com
-bun run dev                           # http://localhost:3000
+bun run dev                                    # http://localhost:3000
 ```
 
 **The rules data has to be extracted once, from your own copy of HERO
@@ -27,9 +27,10 @@ Designer.** A `.hdc` character file records structure rather than presentation �
 a skill is `XMLID="ACTING" LEVELS="1"`, and what it costs and how it prints is
 computed against the game system's data. That data is Hero Games' copyrighted
 material, so it ships with neither this app nor the renderer it uses.
-`extract-rules` writes it where the app looks by default; `HERO_RULES_DIR` moves
-it elsewhere. Without it no character sheet can be drawn and no characteristic
-can be read from an upload, and the server says so at startup.
+`ork-hero-extract-rules` writes it where the app looks by default;
+`HERO_RULES_DIR` moves it elsewhere. Without it no character sheet can be drawn
+and no characteristic can be read from an upload, and the server says so at
+startup.
 
 `ork-hero-export-renderer` is not on npm yet, so `package.json` points at a local
 tarball; that becomes an ordinary `^0.1.0` once it is published.
@@ -951,8 +952,8 @@ the message — and they are still the game master's to correct before saving.
 **The rules data is not shipped, by anyone.** It is derived from Hero Games'
 `*.hdt` files and is their copyrighted material, so neither this app nor the
 renderer distributes it. An operator extracts it from their own copy of HERO
-Designer with `bunx extract-rules /path/to/HD6.jar`, which writes it where the
-app looks by default; `HERO_RULES_DIR` moves it elsewhere. Without it no sheet
+Designer with `bunx ork-hero-extract-rules /path/to/HD6.jar`, which writes it
+where the app looks by default; `HERO_RULES_DIR` moves it elsewhere. Without it no sheet
 can be drawn and no characteristic can be read, so the server says so at startup
 rather than leaving it to be discovered mid-session — and the tests that need it
 skip rather than fail, since it cannot be in CI either.
@@ -1557,7 +1558,7 @@ The app expects a TLS-terminating reverse proxy in front of it.
 
 ```bash
 bun install --production
-bunx extract-rules /path/to/HD6.jar   # once, and again after a HERO Designer update
+bunx ork-hero-extract-rules /path/to/HD6.jar   # once, and again after a HERO Designer update
 bun run cli db:migrate
 NODE_ENV=production bun run start
 ```

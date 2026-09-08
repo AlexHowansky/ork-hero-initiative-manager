@@ -137,8 +137,8 @@ export const config = {
    * against the game system's own data. That data is Hero Games' copyrighted
    * material and so is not distributed with the renderer or with this app: an
    * operator extracts it from their own copy of HERO Designer with
-   * `bunx extract-rules /path/to/HD6.jar`, which by default writes it where the
-   * fallback below looks.
+   * `bunx ork-hero-extract-rules /path/to/HD6.jar`, which by default writes it
+   * where the fallback below looks.
    *
    * Without it no sheet can be rendered and no characteristic can be read off an
    * upload, so `server/index.ts` says so at startup rather than leaving it to be

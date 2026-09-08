@@ -10,7 +10,7 @@
         "@fortawesome/react-fontawesome": "^3.5.0",
         "bun-plugin-tailwind": "^0.0.15",
         "daisyui": "^5.7.28",
-        "ork-hero-export-renderer": "file:../ork-hero-export-renderer",
+        "ork-hero-export-renderer": "^0.9.0",
         "react": "^19.2.8",
         "react-dom": "^19.2.8",
         "react-router": "^7.18.3",
@@ -112,7 +112,7 @@
 
     "detect-libc": ["detect-libc@2.1.2", "", {}, "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ=="],
 
-    "ork-hero-export-renderer": ["ork-hero-export-renderer@file:../ork-hero-export-renderer", { "devDependencies": { "@types/bun": "latest", "typescript": "^5.9.3" }, "bin": { "render": "./dist/cli/render.js", "extract-rules": "./dist/cli/extract-rules.js" } }],
+    "ork-hero-export-renderer": ["ork-hero-export-renderer@0.9.0", "", { "bin": { "ork-hero-render": "dist/cli/render.js", "ork-hero-extract-rules": "dist/cli/extract-rules.js" } }, "sha512-tTa/wN29X7zalTexP77vCjdAeyqpTwpyRrFDYCGCrQDZha9F6qoCiNj4wHcgE+9OVke4Bcd/iC9OPgr4Bq9CRg=="],
 
     "playwright": ["playwright@1.63.0", "", { "dependencies": { "playwright-core": "1.63.0" }, "bin": { "playwright": "cli.js" } }, "sha512-+7ziBLidS4NaNCdt57SUDT+wYmmd5fmiQejUic/kb+YsYSCPyOOE9sebzMjNmQrsnNpDJqd4WHvV/8lfKfUDUg=="],
 
