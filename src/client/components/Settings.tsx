@@ -194,10 +194,6 @@ function CardSize() {
         value={size}
         onChange={(event) => choose(Number(event.target.value))}
       />
-      <p className={`text-xs ${TEXT_MUTED}`}>
-        How large the picture on a card is drawn. The card itself comes out
-        taller — its frame and the name underneath are extra.
-      </p>
     </Setting>
   );
 }
@@ -370,8 +366,9 @@ function Template({ open }: { open: boolean }) {
       </select>
 
       <p className={`text-xs ${TEXT_MUTED}`}>
-        The HERO Designer export template your character sheets are drawn through.
-        Sheets are built as they are opened, so a change shows on the next one.
+        The HERO Designer export template used to render your character sheets.
+        The default selection of <em>Automatic</em> will use a sheet that best
+        fits the current window size.
       </p>
 
       {mine.length > 0
