@@ -10,7 +10,7 @@
         "@fortawesome/react-fontawesome": "^3.5.0",
         "bun-plugin-tailwind": "^0.0.15",
         "daisyui": "^5.7.28",
-        "ork-hero-export-renderer": "/tmp/ork-hero-export-renderer-0.1.0.tgz",
+        "ork-hero-export-renderer": "file:../ork-hero-export-renderer",
         "react": "^19.2.8",
         "react-dom": "^19.2.8",
         "react-router": "^7.18.3",
@@ -19,7 +19,7 @@
         "zod": "^4.5.4",
       },
       "devDependencies": {
-        "@types/bun": "^1.4.1",
+        "@types/bun": "^1.4.2",
         "@types/react": "^19.2.18",
         "@types/react-dom": "^19.2.7",
         "playwright": "^1.63.0",
@@ -92,7 +92,7 @@
 
     "@img/sharp-win32-x64": ["@img/sharp-win32-x64@0.35.4", "", { "os": "win32", "cpu": "x64" }, "sha512-XtmnYhBcrORsJ4XJngyzr/EWP0hRZLAZRFaApdKuviyqF78+ylxh2y06ZmtULAMOnObJ3ucpN0AcwSWnMowTRg=="],
 
-    "@types/bun": ["@types/bun@1.4.1", "", { "dependencies": { "bun-types": "1.4.1" } }, "sha512-0AVGiTXGajf1rgKom3N+c5L7CBxuoyyv1i44M0nX4UDK0G/fnRAMiri93nHuVPIb429KKtAgj7HatVmmOjeQLA=="],
+    "@types/bun": ["@types/bun@1.4.2", "", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
 
     "@types/node": ["@types/node@26.5.0", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-dVSGpriSoCgz8WnDNTuSSuSv1PC/ALXihO4ulRZt7Md8k9mlbdin3lGOcDE8SnWOgf513ByWlXd7BK4azmyg/A=="],
 
@@ -102,7 +102,7 @@
 
     "bun-plugin-tailwind": ["bun-plugin-tailwind@0.0.15", "", { "peerDependencies": { "typescript": "^5.0.0" } }, "sha512-qtAXMNGG4R0UGGI8zWrqm2B7BdXqx48vunJXBPzfDOHPA5WkRUZdTSbE7TFwO4jLhYqSE23YMWsM9NhE6ovobw=="],
 
-    "bun-types": ["bun-types@1.4.1", "", { "dependencies": { "@types/node": "*" } }, "sha512-loKuVrAFZKfEv+JvWkHRS9GW5IqLuLRjVXN9p+vZvBN86O5hf/pBZQ5hSoyipsrMmWObZBDvWnlmKvjKTM0PdA=="],
+    "bun-types": ["bun-types@1.4.2", "", { "dependencies": { "@types/node": "*" } }, "sha512-bxV1FgK7yBIzjRe5zBozIM4Bem11ZJcCXSrjWRG3YWLt8yFDePu4cLjpebO8OvPeIE9trbyPF4fuj3Cia4Fj3w=="],
 
     "cookie": ["cookie@1.1.1", "", {}, "sha512-ei8Aos7ja0weRpFzJnEA9UHJ/7XQmqglbRwnf2ATjcB9Wq874VKH9kfjjirM6UhU2/E5fFYadylyhFldcqSidQ=="],
 
@@ -112,7 +112,7 @@
 
     "detect-libc": ["detect-libc@2.1.2", "", {}, "sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ=="],
 
-    "ork-hero-export-renderer": ["ork-hero-export-renderer@/tmp/ork-hero-export-renderer-0.1.0.tgz", { "bin": { "render": "./dist/cli/render.js", "extract-rules": "./dist/cli/extract-rules.js" } }, "sha512-mlJWibrB7NcWazJHnZEhEobhnVQxjOzHXJI2OCSwUin3Oeh6AHSmUtqeKf2O/HCckeQ4r7HE+uUlK/bfBjmVRA=="],
+    "ork-hero-export-renderer": ["ork-hero-export-renderer@file:../ork-hero-export-renderer", { "devDependencies": { "@types/bun": "latest", "typescript": "^5.9.3" }, "bin": { "render": "./dist/cli/render.js", "extract-rules": "./dist/cli/extract-rules.js" } }],
 
     "playwright": ["playwright@1.63.0", "", { "dependencies": { "playwright-core": "1.63.0" }, "bin": { "playwright": "cli.js" } }, "sha512-+7ziBLidS4NaNCdt57SUDT+wYmmd5fmiQejUic/kb+YsYSCPyOOE9sebzMjNmQrsnNpDJqd4WHvV/8lfKfUDUg=="],
 

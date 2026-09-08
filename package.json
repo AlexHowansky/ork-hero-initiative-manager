@@ -28,7 +28,7 @@
     "@fortawesome/react-fontawesome": "^3.5.0",
     "bun-plugin-tailwind": "^0.0.15",
     "daisyui": "^5.7.28",
-    "ork-hero-export-renderer": "/tmp/ork-hero-export-renderer-0.1.0.tgz",
+    "ork-hero-export-renderer": "file:../ork-hero-export-renderer",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router": "^7.18.3",
@@ -37,7 +37,7 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
-    "@types/bun": "^1.4.1",
+    "@types/bun": "^1.4.2",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.7",
     "playwright": "^1.63.0",
