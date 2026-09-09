@@ -119,6 +119,16 @@ left open would otherwise retry behind "Reconnecting…" for ever. While the soc
 is away, the player screen asks `/api/auth/me` who it is; an answer that is no
 longer this player means the seat is gone, and it says so instead of spinning.
 
+**A screen's opening state is fetched, not waited for.** The socket sends a
+snapshot the moment it opens, but it is the half of the pair that can fail
+without saying so — an upgrade a proxy declines never becomes an error the page
+can show. When that was the only route, a console whose socket never landed drew
+a session with nobody in it and offered to add heroes who were already on the
+stage, so the first click appeared to add the whole party at once. So
+`useSessionSocket` reads `GET /api/sessions/:id` on mount, keeps whichever
+snapshot arrives first, and leaves the socket to do what only it can — say what
+has changed since.
+
 **Every change republishes the whole session.** Rather than sending diffs, any
 mutation recomputes a complete snapshot — session, players, the stage in the
 order it acts — and publishes it to everyone watching. The lists are a dozen rows

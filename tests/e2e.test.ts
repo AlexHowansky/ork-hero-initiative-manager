@@ -319,6 +319,45 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
     await page.getByRole("dialog").getByRole("button", { name: amount, exact: true }).click();
   };
 
+  /**
+   * A console that never gets a socket still draws the fight.
+   *
+   * The socket carries the state a screen opens with, and it is the half of the
+   * pair that can fail without saying so — a proxy that declines the upgrade is
+   * not an error the page can show. When that was the only route, the console
+   * drew a session with nobody in it and offered to add heroes who were already
+   * on the stage, so the first click appeared to bring the whole party in at
+   * once. The state now comes from the API, and the socket only says what has
+   * changed since — which is what this holds in place, by opening the console
+   * with no WebSocket to be had at all.
+   */
+  test("the stage is drawn even when the socket never connects", async () => {
+    if (!browser) return;
+    const { page: gm } = await gmWithSession();
+    const url = gm.url();
+
+    const deaf = await gm.context().newPage();
+    await deaf.addInitScript(() => {
+      // Constructs, and then does nothing for ever: no open, no message, no
+      // close. The hook is left waiting on a socket that never arrives, which is
+      // exactly what a refused upgrade looks like from inside the page.
+      class DeadSocket {
+        readonly readyState = 0;
+        close() {}
+        send() {}
+        addEventListener() {}
+        removeEventListener() {}
+      }
+      Object.defineProperty(window, "WebSocket", { value: DeadSocket });
+    });
+    await deaf.goto(url);
+
+    // The two heroes the session opened with, and the monster added by hand.
+    await stagePanel(deaf).getByText("Elara").waitFor({ timeout: 5000 });
+    await stageCount(deaf, 3);
+    await deaf.close();
+  }, 60_000);
+
   test("what a character has left is edited from either screen", async () => {
     if (!browser) return;
     const { page: gm, code } = await gmWithSession();
