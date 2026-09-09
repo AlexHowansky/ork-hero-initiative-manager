@@ -15,7 +15,7 @@
 
 export type ThemePreference = "system" | "light" | "dark";
 
-const STORAGE_KEY = "ttrpg.theme";
+const STORAGE_KEY = "ork-him.theme";
 
 /** The daisyUI theme each explicit preference selects. See `styles.css`. */
 const THEMES = { light: "winter", dark: "night" } as const;

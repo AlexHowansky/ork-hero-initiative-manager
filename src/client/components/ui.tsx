@@ -1153,7 +1153,7 @@ export function CopyButton({
  * into a text field somewhere — and because during `dragover` the payload itself
  * is unreadable, so the type list is all a target has to go on.
  */
-export const CHARACTER_DRAG = "application/x-ttrpg-character";
+export const CHARACTER_DRAG = "application/x-ork-him-character";
 
 /**
  * Makes any element something can be dragged onto.

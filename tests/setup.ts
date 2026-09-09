@@ -9,7 +9,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-const directory = mkdtempSync(join(tmpdir(), "ttrpg-test-"));
+const directory = mkdtempSync(join(tmpdir(), "ork-him-test-"));
 process.env.DATABASE_PATH = join(directory, "test.db");
 process.env.UPLOAD_DIR = join(directory, "uploads");
 process.env.APP_ORIGIN = "http://localhost:3000";

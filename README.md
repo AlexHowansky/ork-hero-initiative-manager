@@ -653,7 +653,7 @@ themes; "system" is the *absence* of a choice, and it is handled entirely in CSS
 `prefers-color-scheme: dark` query when no `data-theme` attribute is set. So a
 reader who never touches the toggle gets a correct first paint with no script
 involved. An explicit choice writes `data-theme` onto `<html>` and is remembered
-in `localStorage` under `ttrpg.theme`; `initTheme()` applies it before React
+in `localStorage` under `ork-him.theme`; `initTheme()` applies it before React
 renders so a stored choice never flashes the other theme. What is *stored* is the
 preference ("light"), and what is written to the attribute is the theme that
 realises it ("winter") — `THEMES` in `src/client/theme.ts` is the only place that
