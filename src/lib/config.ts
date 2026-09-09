@@ -121,6 +121,25 @@ function logLevel(value: string | undefined): LogLevel {
 
 const appOrigin = (process.env.APP_ORIGIN ?? "http://localhost:3000").replace(/\/+$/, "");
 
+/*
+ * An unset APP_ORIGIN behind a proxy is the one misconfiguration that breaks a
+ * single feature and nothing else, so it is worth a line of its own at startup.
+ *
+ * A browser sends `Sec-Fetch-Site` on every fetch it makes, and the CSRF check
+ * takes that answer when it is there — so the API works. It sends none on a
+ * WebSocket handshake, which leaves the handshake as the only request compared
+ * against APP_ORIGIN itself, and behind a trusted proxy that comparison has no
+ * Host fallback to soften it. The upgrade is refused, the screens keep drawing
+ * whatever they opened with, and nothing in front of the game master says so.
+ */
+if (process.env.APP_ORIGIN === undefined && bool(process.env.TRUSTED_PROXY)) {
+  configWarnings.push(
+    `APP_ORIGIN is unset, so it is ${appOrigin}, while a proxy is trusted. ` +
+      "Set it to the address browsers actually use, or every WebSocket will be " +
+      "refused and no screen will update live.",
+  );
+}
+
 export const config = {
   port: Number(process.env.PORT ?? 3000),
   appOrigin,

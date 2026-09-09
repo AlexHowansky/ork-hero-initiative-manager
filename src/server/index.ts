@@ -16,7 +16,7 @@ import { registerServer } from "./ws.ts";
 
 // Settings that were set but unusable. `config` cannot log them itself — the
 // logger reads it — so it collects them and they are reported here instead.
-for (const warning of configWarnings) log.warn("configuration ignored", { detail: warning });
+for (const warning of configWarnings) log.warn("configuration problem", { detail: warning });
 
 // The rules data is not shipped with the renderer — it is Hero Games' own, and
 // an operator extracts it from their copy of HERO Designer. Nothing needs it

@@ -1627,6 +1627,14 @@ location / {
 The `Upgrade` headers are not optional: without them the WebSocket cannot
 connect and player screens stop updating live.
 
+Neither is `APP_ORIGIN`, which must be the address browsers actually use —
+`https://example.org`, not the `http://127.0.0.1:3000` the proxy speaks to. A
+handshake carries no `Sec-Fetch-Site`, so it is the one request compared against
+`APP_ORIGIN` itself, and behind a trusted proxy that comparison has no Host
+fallback: get it wrong and every part of the app works except the sockets, which
+are refused with `socket refused: unexpected origin` in the log, both origins
+printed side by side. Startup warns when it is left unset behind a proxy.
+
 Back up `data/` — it holds both the database and every uploaded file.
 
 ## Security notes

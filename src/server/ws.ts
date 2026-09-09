@@ -283,8 +283,15 @@ export const wsRoute = (request: BunRequest, server: Server<SocketData>): Respon
     checkOrigin(request);
   } catch (error) {
     if (!(error instanceof AppError)) throw error;
+    // `expected` is here because this refusal has one likely cause and the
+    // line is where it gets diagnosed. A handshake carries no Sec-Fetch-Site,
+    // so it is the one request checked against APP_ORIGIN itself — which means
+    // a deployment whose APP_ORIGIN does not name the address browsers actually
+    // use works in every respect except live updates, and says nothing about
+    // why. Printed side by side, the mismatch is the whole answer.
     log.warn("socket refused: unexpected origin", {
       origin: request.headers.get("origin"),
+      expected: config.appOrigin,
       fetchSite: request.headers.get("sec-fetch-site"),
     });
     return new Response(error.message, { status: error.status });
