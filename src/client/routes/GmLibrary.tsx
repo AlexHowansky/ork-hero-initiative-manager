@@ -26,6 +26,7 @@ import type { HeroStatField } from "../../lib/hero.ts";
 import { compareNames } from "../../lib/names.ts";
 import { splitCharacterFile, type SplitCharacter } from "../hdc.ts";
 import { fitFileToCard } from "../images.ts";
+import { ConnectionWarning } from "../components/ConnectionWarning.tsx";
 import { useSessionSocket } from "../useSessionSocket.ts";
 import { useLiveSessions } from "../useLiveSessions.ts";
 import { measureTrack, useCardFit } from "../useCardFit.ts";
@@ -1199,6 +1200,9 @@ export function GmLibrary({ email, onSignOut }: { email: string; onSignOut: () =
           <p className={`text-sm ${TEXT_MUTED}`}>Signed in as {email}</p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Every socket this page holds — the session list's, and one for each
+              session in progress — reports into this one icon. */}
+          <ConnectionWarning />
           <ThemeToggle />
           {/* Between the theme and the sign-out, in the corner its drawer comes
               out of — the same place, and the same gear, as on the console. */}

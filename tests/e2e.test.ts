@@ -16,6 +16,7 @@ import { gms } from "../src/db/queries.ts";
 import { CARD_IMAGE_PX } from "../src/lib/cards.ts";
 import { hdcBytes, hdeSource, rulesAvailable, unique } from "./helpers.ts";
 import { BUILT_IN_TEMPLATE_ID } from "../src/lib/templates.ts";
+import { TROUBLE_DELAY_MS } from "../src/client/liveStatus.ts";
 
 const PASSWORD = "a-sufficiently-long-password";
 const email = `${unique("gm")}@example.com`;
@@ -394,6 +395,150 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
    * changed since — which is what this holds in place, by opening the console
    * with no WebSocket to be had at all.
    */
+  /**
+   * The warning in the header, and what it takes to make it appear.
+   *
+   * `TROUBLE_DELAY_MS` is imported rather than written out: the delay is the
+   * feature — it is what keeps a page load and a half-second blip from flashing
+   * a red icon — and a test that hard-coded it would pass while disagreeing with
+   * the app about what it is.
+   */
+  const warning = (page: Page) =>
+    // By its own words rather than by its role alone: the toast region is a
+    // status too, and it is on every page whether or not it is holding a toast.
+    page.getByRole("status", { name: /Live updates/ });
+
+  test("a socket that never connects is reported in the header", async () => {
+    if (!browser) return;
+    const { page: gm } = await gmWithSession();
+    const url = gm.url();
+
+    const deaf = await gm.context().newPage();
+    await deaf.addInitScript(() => {
+      // The same socket that goes nowhere: it never opens, and — the part that
+      // matters here — it never closes either, so there is no failure to react
+      // to. A warning built on close events would have nothing to say about the
+      // commonest way this breaks.
+      class DeadSocket {
+        readonly readyState = 0;
+        close() {}
+        send() {}
+        addEventListener() {}
+        removeEventListener() {}
+      }
+      Object.defineProperty(window, "WebSocket", { value: DeadSocket });
+    });
+    await deaf.goto(url);
+
+    // Nothing yet: the page is drawn from the API before the threshold passes,
+    // and a console that flashed a red triangle on every load would be worse
+    // than one that says nothing.
+    await stagePanel(deaf).getByText("Elara").waitFor({ timeout: 5000 });
+    expect(await warning(deaf).count()).toBe(0);
+
+    await warning(deaf).waitFor({ timeout: TROUBLE_DELAY_MS + 8000 });
+    const message = await warning(deaf).getAttribute("title");
+    expect(message).toContain("could not connect");
+    expect(message).toContain("never answered");
+    await deaf.close();
+  }, 60_000);
+
+  test("a socket that opens and then dies is reported as a connection lost", async () => {
+    if (!browser) return;
+    const { page: gm } = await gmWithSession();
+    const url = gm.url();
+
+    const dropped = await gm.context().newPage();
+    await dropped.addInitScript(() => {
+      // Opens, says nothing, and is closed under the page a moment later with
+      // the code a dropped connection really carries.
+      class DyingSocket {
+        readyState = 0;
+        onopen: (() => void) | null = null;
+        onclose: ((event: { code: number; reason: string }) => void) | null = null;
+        onmessage: (() => void) | null = null;
+        constructor() {
+          setTimeout(() => {
+            this.readyState = 1;
+            this.onopen?.();
+            setTimeout(() => {
+              this.readyState = 3;
+              this.onclose?.({ code: 1006, reason: "" });
+            }, 50);
+          }, 10);
+        }
+        close() {}
+        send() {}
+        addEventListener() {}
+        removeEventListener() {}
+      }
+      Object.defineProperty(window, "WebSocket", { value: DyingSocket });
+    });
+    await dropped.goto(url);
+
+    await warning(dropped).waitFor({ timeout: TROUBLE_DELAY_MS + 8000 });
+    const message = await warning(dropped).getAttribute("title");
+    // It was open once, so this is a connection lost rather than one that could
+    // never be made — and the close code it died of is in the second line.
+    expect(message).toContain("was lost");
+    expect(message).toContain("1006");
+    await dropped.close();
+  }, 60_000);
+
+  test("the library reports its sockets too, as one icon rather than several", async () => {
+    if (!browser) return;
+    // A game master with a session running, so the library holds the list's own
+    // socket and a second one for the session's row.
+    const { page: gm } = await gmWithSession();
+
+    const deaf = await gm.context().newPage();
+    await deaf.addInitScript(() => {
+      class DeadSocket {
+        readonly readyState = 0;
+        close() {}
+        send() {}
+        addEventListener() {}
+        removeEventListener() {}
+      }
+      Object.defineProperty(window, "WebSocket", { value: DeadSocket });
+    });
+    await deaf.goto(`${base}/gm`);
+
+    await warning(deaf).waitFor({ timeout: TROUBLE_DELAY_MS + 8000 });
+    // Two sockets are down, and the header says so once.
+    expect(await warning(deaf).count()).toBe(1);
+    expect(await warning(deaf).getAttribute("title")).toContain("connections");
+    await deaf.close();
+  }, 60_000);
+
+  test("a healthy console says nothing about its connection, ever", async () => {
+    if (!browser) return;
+    const { page: gm } = await gmWithSession();
+
+    // Deliberately a wait and then a look, rather than waiting for something to
+    // appear: what is being asserted is an absence that only means anything
+    // once the threshold it is measured against has passed.
+    await gm.waitForTimeout(TROUBLE_DELAY_MS + 1500);
+    expect(await warning(gm).count()).toBe(0);
+  }, 60_000);
+
+  test("a session that is ended is not an outage", async () => {
+    if (!browser) return;
+    const { page: gm, code, campaignName } = await gmWithSession();
+    const player = await playerIn(code, "Nadia", campaignName);
+
+    // The console's own control, beside the invite code.
+    await gm.getByRole("button", { name: "End", exact: true }).click();
+    await gm.getByRole("dialog").getByRole("button", { name: "End session" }).click();
+
+    // The player is told the session ended, which is the screen saying it for
+    // itself. The socket is gone because there is nothing left to watch, and a
+    // red triangle on top of that would be reporting a fault that never happened.
+    await player.getByText("The session has ended").waitFor({ timeout: 10_000 });
+    await player.waitForTimeout(TROUBLE_DELAY_MS + 1000);
+    expect(await warning(player).count()).toBe(0);
+  }, 60_000);
+
   test("the stage is drawn even when the socket never connects", async () => {
     if (!browser) return;
     const { page: gm } = await gmWithSession();

@@ -39,6 +39,7 @@ import {
   faUserSlash,
 } from "@fortawesome/free-solid-svg-icons";
 import type { VitalsPatch } from "../components/Vitals.tsx";
+import { ConnectionWarning } from "../components/ConnectionWarning.tsx";
 import { InitiativeList, stageLabel } from "../components/InitiativeList.tsx";
 import { LogDrawer, LogToggle, useLogDrawer } from "../components/EventLog.tsx";
 import { SettingsDrawer, SettingsToggle, useSettingsDrawer } from "../components/Settings.tsx";
@@ -60,7 +61,7 @@ export function GmSessionConsole({ onSignOut }: { onSignOut: () => void }) {
   // Green unless the server says otherwise: the Post-Segment 12 Recovery and the
   // turn passing to your character are both the fight going well, and a notice
   // that is not — a character stunned by a hit — sends the tone to say so.
-  const { snapshot, connection, applySnapshot } = useSessionSocket(
+  const { snapshot, applySnapshot } = useSessionSocket(
     sessionId,
     (message, tone) => toast.show(message, tone ?? "success"),
   );
@@ -445,7 +446,7 @@ export function GmSessionConsole({ onSignOut }: { onSignOut: () => void }) {
         Three tracks rather than a row with the name in the middle of it: the
         outer two are equal, so the campaign's name is centred on the page rather
         than on whatever is left over between the button and the toggle, and it
-        stays put as the reconnecting note comes and goes.
+        stays put as the connection warning comes and goes.
       */}
       <header className="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3">
         {/* The log first, because it is what opens directly below it: the drawer
@@ -462,9 +463,7 @@ export function GmSessionConsole({ onSignOut }: { onSignOut: () => void }) {
         </h1>
 
         <div className="flex flex-wrap items-center justify-end gap-2 justify-self-end">
-          {connection === "reconnecting" ? (
-            <span className="badge badge-sm badge-warning badge-soft">Reconnecting…</span>
-          ) : null}
+          <ConnectionWarning />
           <ThemeToggle />
           {/* Between the theme and the sign-out: the drawer comes out of this
               corner, the same way the log's control sits in the corner its

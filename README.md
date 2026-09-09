@@ -119,6 +119,28 @@ left open would otherwise retry behind "Reconnecting…" for ever. While the soc
 is away, the player screen asks `/api/auth/me` who it is; an answer that is no
 longer this player means the seat is gone, and it says so instead of spinning.
 
+**A socket that is not working says so.** The failure a live app cannot show by
+drawing nothing is a socket that has stopped: the page keeps displaying whatever
+it last knew, which looks exactly like a table where nothing is happening. So
+every socket reports its health into `src/client/liveStatus.ts`, and a red
+`fa-triangle-exclamation` appears in the header — one icon per page, however many
+sockets that page holds, with the reason on hover.
+
+Two decisions carry it. **Trouble is "not open", not "closed"**: a socket reports
+the moment it starts connecting and clears when it opens, because the commonest
+way this breaks — a proxy swallowing the upgrade — produces no error and no close
+at all, so a warning waiting to be told would wait for ever. And **the clock runs
+from when the socket stopped being open**, not from the last attempt, or a socket
+retrying every half second would reset its own two-second grace and never report.
+That grace is what keeps a page load, a `bun --hot` restart and a one-second blip
+from flashing anything.
+
+A store rather than a context, for the reason `gmSettings.ts` gives: the library
+page holds one socket for its session list and another for every session in
+progress, and threading their health up through a list to a header would be a lot
+of plumbing for one icon. `ended` and `kicked` are not faults and never warn —
+those screens say what happened for themselves.
+
 **A screen's opening state is fetched, not waited for.** The socket sends a
 snapshot the moment it opens, but it is the half of the pair that can fail
 without saying so — an upgrade a proxy declines never becomes an error the page

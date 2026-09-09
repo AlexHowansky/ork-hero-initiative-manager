@@ -39,6 +39,7 @@ import {
   SURFACE,
   TEXT_MUTED,
 } from "../components/ui.tsx";
+import { ConnectionWarning } from "../components/ConnectionWarning.tsx";
 import { InitiativeList, stageLabel } from "../components/InitiativeList.tsx";
 import { LogDrawer, LogToggle, useLogDrawer } from "../components/EventLog.tsx";
 import { SegmentFilterToggle, useSegmentFilter } from "../components/SegmentFilter.tsx";
@@ -296,7 +297,13 @@ export function PlayerSession({
       <div className="w-full p-2 sm:p-3">
         <header className="mb-6 flex items-center justify-between">
           <h1 className="text-xl font-semibold">Welcome, {playerName}</h1>
-          <ThemeToggle />
+          {/* This screen promises the list fills itself in as characters are
+              freed up, which is a promise the socket keeps — so it is a screen
+              that has to say when the socket is not keeping it. */}
+          <div className="flex items-center gap-2">
+            <ConnectionWarning />
+            <ThemeToggle />
+          </div>
         </header>
 
         <Panel title="Choose your character">
@@ -366,9 +373,7 @@ export function PlayerSession({
         </h1>
 
         <div className="flex items-center justify-end gap-2">
-          {connection === "reconnecting" ? (
-            <span className="badge badge-sm badge-warning badge-soft">Reconnecting…</span>
-          ) : null}
+          <ConnectionWarning />
           <ThemeToggle />
           {/* The same picture the game master's `Sign out` carries: for a player,
               leaving the table is the same gesture as signing out of one. */}
