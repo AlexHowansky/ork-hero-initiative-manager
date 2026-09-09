@@ -24,8 +24,8 @@ export const campaignRoutes = {
       const form = await request.formData();
       const { name } = parse(schemas.campaignInput, { name: form.get("name") });
 
-      // Names are unique across the whole library, per the spec.
-      if (campaigns.nameTaken(name)) {
+      // Names are unique within a game master's own library, per the spec.
+      if (campaigns.nameTaken(gm.id, name)) {
         throw errors.conflict(`A campaign called “${name}” already exists.`);
       }
 
@@ -53,7 +53,7 @@ export const campaignRoutes = {
       const rawName = form.get("name");
       if (typeof rawName === "string") {
         const { name } = parse(schemas.campaignInput, { name: rawName });
-        if (name !== campaign.name && campaigns.nameTaken(name, campaign.id)) {
+        if (name !== campaign.name && campaigns.nameTaken(campaign.gm_id, name, campaign.id)) {
           throw errors.conflict(`A campaign called “${name}” already exists.`);
         }
         changes.name = name;

@@ -47,7 +47,7 @@ describe("one active session per campaign", () => {
     addActiveSession(target, "new", "2026-01-01T12:00:00.000Z");
 
     // Every migration after 001, which `atInitialSchema` has already applied.
-    expect(migrate(target)).toBe(14);
+    expect(migrate(target)).toBe(15);
 
     const statuses = Object.fromEntries(
       target.query<{ id: string; status: string }, []>(
@@ -401,5 +401,76 @@ describe("a game master's card size", () => {
       "SELECT card_image_px FROM gms WHERE id = 'gm1'",
     ).get()!.card_image_px;
     expect(size).toBe(CARD_IMAGE_PX.default);
+  });
+});
+
+describe("campaign names per game master", () => {
+  /** A second game master, and a character and a session hanging off c1. */
+  function withNeighbours(target: Database): void {
+    target.exec(`
+      INSERT INTO gms VALUES
+        ('gm2', 'other@example.com', 'hash', '2026-01-01T00:00:00.000Z',
+         '2026-01-01T00:00:00.000Z');
+      INSERT INTO uploads VALUES
+        ('u1', 'sheet', 'sheets/u1', 'text/html', 10, 'sha', 'grognard.hdc',
+         '2026-01-01T00:00:00.000Z');
+      INSERT INTO characters (id, campaign_id, kind, name, sheet_upload_id, created_at, updated_at)
+        VALUES ('ch1', 'c1', 'pc', 'Grognard', 'u1', '2026-01-01T00:00:00.000Z',
+                '2026-01-01T00:00:00.000Z');
+    `);
+    addActiveSession(target, "s1", "2026-01-01T10:00:00.000Z");
+  }
+
+  test("the rebuild leaves the campaign's characters and sessions where they were", () => {
+    const target = atInitialSchema();
+    withNeighbours(target);
+
+    migrate(target);
+
+    // The whole risk of this migration: `campaigns` is dropped and rebuilt, and
+    // both of these cascade from it.
+    expect(
+      target.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM characters").get()!.count,
+    ).toBe(1);
+    expect(
+      target.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM game_sessions").get()!
+        .count,
+    ).toBe(1);
+    // And they still point at a campaign that exists.
+    expect(target.query<{ n: number }, []>("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  test("the campaign itself comes through unchanged", () => {
+    const target = atInitialSchema();
+
+    migrate(target);
+
+    const row = target.query<
+      { gm_id: string; name: string; created_at: string },
+      []
+    >("SELECT gm_id, name, created_at FROM campaigns WHERE id = 'c1'").get()!;
+    expect(row).toEqual({
+      gm_id: "gm1",
+      name: "Campaign",
+      created_at: "2026-01-01T00:00:00.000Z",
+    });
+  });
+
+  test("two game masters may each run a campaign of the same name", () => {
+    const target = atInitialSchema();
+    withNeighbours(target);
+    migrate(target);
+
+    const add = (id: string, gm: string, name: string) =>
+      target.query(`
+        INSERT INTO campaigns (id, gm_id, name, created_at, updated_at)
+        VALUES ($id, $gm, $name, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')
+      `).run({ id, gm, name });
+
+    // Nobody sees another game master's library, so the name is not in the way.
+    expect(() => add("c2", "gm2", "Campaign")).not.toThrow();
+
+    // Within one library it still is, case and all.
+    expect(() => add("c3", "gm1", "CAMPAIGN")).toThrow(/UNIQUE constraint/i);
   });
 });

@@ -4,6 +4,13 @@
  * Migrations are `.sql` files in ./migrations, applied in filename order and
  * recorded in `schema_migrations` so each runs exactly once. Each file is applied
  * inside a transaction, so a failure leaves the database on the previous version.
+ *
+ * Foreign keys are enforced by the app but not during a migration, because a
+ * migration that rebuilds a table has to drop the old one, and a drop under
+ * enforcement takes every child row with it. `PRAGMA foreign_keys` is a no-op
+ * inside a transaction, so it is turned off out here and on again afterwards;
+ * what stands in for it is a `foreign_key_check` run before the commit, which
+ * rolls the file back if it left a row pointing at nothing.
  */
 
 import { Database } from "bun:sqlite";
@@ -38,11 +45,29 @@ export function migrate(target: Database = db): number {
 
     const run = target.transaction(() => {
       target.exec(contents);
+
+      const violations = target.query<{ table: string; parent: string }, []>(
+        "PRAGMA foreign_key_check",
+      ).all();
+      if (violations.length > 0) {
+        const [first] = violations;
+        throw new Error(
+          `migration ${file} left ${violations.length} row(s) with a broken reference ` +
+          `(${first!.table} -> ${first!.parent})`,
+        );
+      }
+
       target
         .query("INSERT INTO schema_migrations (name, applied_at) VALUES ($name, $appliedAt)")
         .run({ name: file, appliedAt: now() });
     });
-    run();
+
+    target.exec("PRAGMA foreign_keys = OFF");
+    try {
+      run();
+    } finally {
+      target.exec("PRAGMA foreign_keys = ON");
+    }
 
     log.info("migration applied", { migration: file });
     count += 1;

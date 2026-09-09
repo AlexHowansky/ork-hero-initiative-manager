@@ -393,11 +393,12 @@ export const campaigns = {
     db.query("DELETE FROM campaigns WHERE id = $id").run({ id });
   },
 
-  /** Whether another campaign already holds this name (names are globally unique). */
-  nameTaken(name: string, exceptId?: string): boolean {
-    const row = db.query<{ id: string }, { name: string; exceptId: string }>(
-      "SELECT id FROM campaigns WHERE name = $name AND id != $exceptId",
-    ).get({ name, exceptId: exceptId ?? "" });
+  /** Whether this game master already has another campaign under this name. */
+  nameTaken(gmId: string, name: string, exceptId?: string): boolean {
+    const row = db.query<{ id: string }, { gmId: string; name: string; exceptId: string }>(`
+      SELECT id FROM campaigns
+      WHERE gm_id = $gmId AND name = $name AND id != $exceptId
+    `).get({ gmId, name, exceptId: exceptId ?? "" });
     return row !== null;
   },
 };

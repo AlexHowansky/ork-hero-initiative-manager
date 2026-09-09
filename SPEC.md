@@ -201,7 +201,8 @@ The app should have the following features:
   UI for account management.
 
 * A game master may create, edit, and delete campaigns. Each campaign must have
-  a unique name. Each campaign may have a card image. Present the campaign
+  a name that is unique within that game master's own library; two game masters
+  may each have a campaign of the same name. Each campaign may have a card image. Present the campaign
   library as cards.
 
 * A game master may add, edit, and delete PCs and NPCs. These are represented by

@@ -177,7 +177,7 @@ function CampaignForm({
         value={name}
         onChange={(event) => setName(event.target.value)}
         required
-        hint="Campaign names are unique."
+        hint="Campaign names are unique to you."
       />
       <FileDrop
         label="Card image (optional)"

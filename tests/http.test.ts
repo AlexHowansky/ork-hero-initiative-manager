@@ -1996,6 +1996,65 @@ describe("the log", () => {
   });
 });
 
+describe("a campaign name belongs to the game master who chose it", () => {
+  const create = (cookie: string, name: string) => {
+    const form = new FormData();
+    form.set("name", name);
+    return fetch(`${base}/api/campaigns`, authed(cookie, { method: "POST", body: form }));
+  };
+
+  test("two game masters may each run a campaign of the same name", async () => {
+    const first = await signIn();
+    const second = await signIn();
+    const name = unique("Champions");
+
+    expect((await create(first.cookie, name)).status).toBe(201);
+
+    // Neither sees the other's library, so the name is not spoken for.
+    expect((await create(second.cookie, name)).status).toBe(201);
+  });
+
+  test("but one of them cannot use it twice", async () => {
+    const { cookie } = await signIn();
+    const name = unique("Champions");
+
+    expect((await create(cookie, name)).status).toBe(201);
+
+    // Case and all, since the name is what tells one card from another.
+    const again = await create(cookie, name.toUpperCase());
+    expect(again.status).toBe(409);
+    const body = await again.json();
+    expect(body.error.code).toBe("conflict");
+    expect(body.error.message).toMatch(/already exists/i);
+  });
+
+  test("nor rename one onto a name their own library already holds", async () => {
+    const { cookie } = await signIn();
+    const stranger = await signIn();
+    const taken = unique("Champions");
+    const mine = unique("Champions");
+
+    await create(cookie, taken);
+    const campaign = (await (await create(cookie, mine)).json()).campaign;
+
+    // A name another game master holds is free to take.
+    const strangers = unique("Champions");
+    await create(stranger.cookie, strangers);
+
+    const rename = async (name: string) => {
+      const form = new FormData();
+      form.set("name", name);
+      return fetch(
+        `${base}/api/campaigns/${campaign.id}`,
+        authed(cookie, { method: "PATCH", body: form }),
+      );
+    };
+
+    expect((await rename(taken)).status).toBe(409);
+    expect((await rename(strangers)).status).toBe(200);
+  });
+});
+
 describe("a campaign runs one session at a time", () => {
   const start = (cookie: string, campaignId: string) =>
     fetch(
