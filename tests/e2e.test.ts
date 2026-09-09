@@ -270,6 +270,69 @@ async function dropImage(target: Locator) {
   });
 }
 
+/**
+ * Teaches a page to make a picture too big to upload.
+ *
+ * Noise rather than a flat colour, because a PNG of one colour is a few hundred
+ * bytes however many pixels it has, and the point of this file is its weight: at
+ * 2000×2000 of random pixels it is several megabytes, comfortably past
+ * `UPLOAD_LIMIT_BYTES`. Made in the browser rather than handed to it, since
+ * passing megabytes across the Playwright boundary costs more than drawing them
+ * — and left on `window` so both gestures below reach the same one.
+ */
+async function armOversizePicture(page: Page) {
+  await page.evaluate(() => {
+    Object.assign(window, {
+      oversizePicture: async () => {
+        const size = 2000;
+        const canvas = new OffscreenCanvas(size, size);
+        const context = canvas.getContext("2d")!;
+        const pixels = context.createImageData(size, size);
+        for (let index = 0; index < pixels.data.length; index += 4) {
+          pixels.data[index] = Math.random() * 256;
+          pixels.data[index + 1] = Math.random() * 256;
+          pixels.data[index + 2] = Math.random() * 256;
+          pixels.data[index + 3] = 255;
+        }
+        context.putImageData(pixels, 0, 0);
+        const blob = await canvas.convertToBlob({ type: "image/png" });
+        return new File([blob], "oversize.png", { type: "image/png" });
+      },
+    });
+  });
+}
+
+/** The page's picture factory, as the evaluated code sees it. */
+type PictureMaker = { oversizePicture: () => Promise<File> };
+
+/** Drops that picture on an element, as dragging one in from the desktop would. */
+async function dropOversizePicture(target: Locator) {
+  await target.evaluate(async (element) => {
+    const file = await (window as unknown as PictureMaker).oversizePicture();
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    element.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer: transfer }));
+    element.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer: transfer }));
+  });
+}
+
+/**
+ * Puts it in a file field, as picking it with `Choose file` would.
+ *
+ * `setInputFiles` cannot do it: the file is made in the page and Playwright
+ * takes one from disk. Setting `files` and dispatching `change` is what a
+ * browser does when the picker closes, and `change` is what React listens for.
+ */
+async function pickOversizePicture(input: Locator) {
+  await input.evaluate(async (element) => {
+    const file = await (window as unknown as PictureMaker).oversizePicture();
+    const transfer = new DataTransfer();
+    transfer.items.add(file);
+    (element as HTMLInputElement).files = transfer.files;
+    element.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
 describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => {
   test("a player's screen follows the game master with no refresh", async () => {
     if (!browser) return;
@@ -2082,6 +2145,75 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
     await gm.getByText(`Updated the picture for “${campaignName}”.`).waitFor();
     await card.locator("img").waitFor();
   }, 60_000);
+
+  /**
+   * Every way a picture can be chosen, against a file the server would refuse.
+   *
+   * The upload ceiling is checked as the bytes arrive, before the server has
+   * anything to scale — so a photograph off a phone is refused outright rather
+   * than shrunk, and the only thing that can save it is the browser sizing it
+   * first. That makes "it was filed at all" the assertion: an oversize picture
+   * that lands on a card is one that was fitted on the way, and one that was not
+   * would have come back as `That image is too large`.
+   *
+   * All six gestures, because they are six separate pieces of wiring — two
+   * dialogs, a drop and a picker within each, and the drop straight onto a card
+   * that skips the dialogs entirely — and they have already been out of step
+   * once, when only the character file's own portrait was sized.
+   */
+  test("an oversize picture is sized in the browser, however it is chosen", async () => {
+    if (!browser) return;
+    const gm = await signedInGm();
+    await armOversizePicture(gm);
+
+    const campaignName = unique("Campaign");
+    await gm.getByRole("button", { name: "New", exact: true }).click();
+    // 1. Picked in the campaign dialog.
+    await gm.getByLabel("Campaign name").fill(campaignName);
+    await pickOversizePicture(gm.getByLabel("Card image (optional)"));
+    await gm.getByRole("button", { name: "Create campaign" }).click();
+    await gm.getByText(`Characters in ${campaignName}`).waitFor();
+
+    const campaignCard = gm.getByRole("button", { name: `Select ${campaignName}` });
+    await campaignCard.locator("img").waitFor();
+
+    // 2. Dropped on the campaign dialog's field.
+    await gm.getByRole("button", { name: `Edit ${campaignName}` }).click();
+    await dropOversizePicture(gm.getByLabel("Card image (optional)"));
+    await gm.getByRole("button", { name: "Save changes" }).click();
+    await gm.getByRole("dialog").waitFor({ state: "detached" });
+
+    // 3. Dropped straight onto the campaign card.
+    await dropOversizePicture(campaignCard);
+    await gm.getByText(`Updated the picture for “${campaignName}”.`).waitFor();
+
+    // 4. Picked in the character dialog, alongside the sheet.
+    await gm.getByRole("button", { name: "Add", exact: true }).click();
+    await gm.getByLabel("Name").fill("Gandalf");
+    await gm.getByLabel(/Character file/).setInputFiles({
+      name: "sheet.hdc",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from(hdcBytes({ name: "Gandalf" }) as Uint8Array<ArrayBuffer>),
+    });
+    await pickOversizePicture(gm.getByLabel("Card image (optional)"));
+    await gm.getByRole("button", { name: "Add character" }).last().click();
+
+    const card = gm.getByRole("button", { name: "Gandalf", exact: true });
+    await card.locator("img").waitFor();
+
+    // 5. Dropped on the character dialog's field.
+    await gm.getByRole("button", { name: "Edit Gandalf" }).click();
+    await dropOversizePicture(gm.getByLabel("Card image (optional)"));
+    await gm.getByRole("button", { name: "Save changes" }).click();
+    await gm.getByRole("dialog").waitFor({ state: "detached" });
+
+    // 6. Dropped straight onto the character card.
+    await dropOversizePicture(card);
+    await gm.getByText("Updated the picture for “Gandalf”.").waitFor();
+
+    // Nothing anywhere said it was too large, which is the whole of the claim.
+    expect(await gm.getByText(/too large/i).count()).toBe(0);
+  }, 120_000);
 
   test("a picture dropped on a character card becomes that character's, and nothing else", async () => {
     if (!browser) return;

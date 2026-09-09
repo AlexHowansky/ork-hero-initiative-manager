@@ -25,6 +25,7 @@ import {
 import type { HeroStatField } from "../../lib/hero.ts";
 import { compareNames } from "../../lib/names.ts";
 import { splitCharacterFile, type SplitCharacter } from "../hdc.ts";
+import { fitFileToCard } from "../images.ts";
 import { useSessionSocket } from "../useSessionSocket.ts";
 import { useLiveSessions } from "../useLiveSessions.ts";
 import { measureTrack, useCardFit } from "../useCardFit.ts";
@@ -97,6 +98,47 @@ function insertByName(current: Character[], added: Character): Character[] {
 
 /* ------------------------------------------------------------------- dialogs */
 
+/**
+ * Sizes a card picture as it is chosen, so the dialog uploads the card rather
+ * than the photograph.
+ *
+ * Both edit dialogs carry the same `Card image` field and want the same thing of
+ * it. The work starts the moment the file lands, while the game master is still
+ * filling the rest of the dialog in, so by the time they submit it is nearly
+ * always done — but `apply` waits for it rather than settling for whatever is
+ * ready, because the alternative is a picture uploaded whole for having been
+ * chosen a second before the button. That is not a theoretical second: a
+ * dialog whose only remaining field is the picture is submitted the instant the
+ * picker closes, and the ceiling that rejects an unfitted photograph does not
+ * care why it was unfitted.
+ *
+ * Waiting costs nothing that is not already being waited for — the dialog is on
+ * `Saving…` and an upload is about to follow — and the fit itself never fails:
+ * a picture it cannot decode comes back as the file it was given, for the server
+ * to deal with as it always has.
+ *
+ * The file the fit was started from is kept beside it, the same guard the
+ * character split uses: a picture chosen while the previous one is still being
+ * scaled must not be uploaded as that previous one.
+ */
+function useCardImageFit() {
+  const fitting = useRef<{ source: File; done: Promise<File> } | null>(null);
+
+  const take = (file: File) => {
+    fitting.current = { source: file, done: fitFileToCard(file) };
+  };
+
+  const apply = async (form: FormData) => {
+    const chosen = form.get("card");
+    const held = fitting.current;
+    if (held && chosen instanceof File && chosen === held.source) {
+      form.set("card", await held.done);
+    }
+  };
+
+  return { take, apply };
+}
+
 function CampaignForm({
   campaign,
   onDone,
@@ -107,6 +149,7 @@ function CampaignForm({
   const toast = useToast();
   const [name, setName] = useState(campaign?.name ?? "");
   const [busy, setBusy] = useState(false);
+  const cardImage = useCardImageFit();
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -114,6 +157,7 @@ function CampaignForm({
     form.set("name", name);
     setBusy(true);
     try {
+      await cardImage.apply(form);
       const result = campaign
         ? await api.patchForm<{ campaign: Campaign }>(`/api/campaigns/${campaign.id}`, form)
         : await api.postForm<{ campaign: Campaign }>("/api/campaigns", form);
@@ -138,6 +182,7 @@ function CampaignForm({
         label="Card image (optional)"
         name="card"
         accept="image/png,image/jpeg,image/gif,image/webp"
+        onFile={cardImage.take}
       />
       {campaign?.cardUrl ? (
         <label className={`flex items-center gap-2 text-sm ${TEXT_MUTED}`}>
@@ -236,6 +281,9 @@ function CharacterForm({
    */
   const split = useRef<{ source: File; parts: SplitCharacter } | null>(null);
 
+  /** The card picture, sized as it was chosen. See `useCardImageFit`. */
+  const cardImage = useCardImageFit();
+
   /**
    * Fills the characteristics in from the character file.
    *
@@ -294,8 +342,12 @@ function CharacterForm({
       if (held.parts.portrait) form.set("sheetPortrait", held.parts.portrait);
     }
 
+
     setBusy(true);
     try {
+      // And the picture chosen as a picture, which is sized the same way and for
+      // the same reasons — only it needs no taking apart first.
+      await cardImage.apply(form);
       const result = character
         ? await api.patchForm<{ character: Character }>(`/api/characters/${character.id}`, form)
         : await api.postForm<{ character: Character }>("/api/characters", form);
@@ -400,6 +452,7 @@ function CharacterForm({
         label="Card image (optional)"
         name="card"
         accept="image/png,image/jpeg,image/gif,image/webp"
+        onFile={cardImage.take}
       />
 
       {/*
@@ -1041,11 +1094,18 @@ export function GmLibrary({ email, onSignOut }: { email: string; onSignOut: () =
    *
    * Nothing checks the file first. `accept` filters the picker, and the server
    * identifies an image by its content rather than its name, so a sheet dropped
-   * on a card is refused there and the refusal is what the toast shows.
+   * on a card is refused there and the refusal is what the toast shows — and a
+   * file the fit cannot decode is handed on whole, which is the same path.
+   *
+   * Sized on the way, as the dialogs size theirs (`useCardImageFit`). Awaited
+   * here rather than started earlier because there is nowhere earlier: a drop is
+   * the whole gesture, and the picture is wanted in the same breath. It is a
+   * decode and an encode of one image, against an upload of the megabytes it
+   * would otherwise have been.
    */
   const setCardImage = async (file: File, target: Campaign | Character) => {
     const form = new FormData();
-    form.set("card", file);
+    form.set("card", await fitFileToCard(file));
     const character = "campaignId" in target;
     try {
       if (character) {

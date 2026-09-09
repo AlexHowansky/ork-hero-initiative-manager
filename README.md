@@ -1052,8 +1052,9 @@ never replaces an existing one, and a failure is logged and forgotten rather tha
 failing the upload, since a portrait nobody asked for is not worth an error.
 
 **The browser takes the file apart before uploading it.** `src/client/hdc.ts`
-decodes the `.hdc`, lifts the picture out, scales it to the size a card shows it
-at and encodes it as WebP, and sends the character and the picture as two parts —
+decodes the `.hdc`, lifts the picture out, hands it to `images.ts` to be scaled
+to the size a card shows it at and encoded as WebP, and sends the character and
+the picture as two parts —
 a 3.7 MB upload becomes tens of kilobytes, twice over, since the dialog also
 sends the file to be read for its characteristics. It also means a character
 whose embedded portrait would push the file past `UPLOAD_LIMIT_BYTES` can be
@@ -1231,13 +1232,26 @@ differently. Nothing is enlarged either, and one whose bytes sharp cannot read i
 stored exactly as it arrived, since it passed the magic-byte check and a game
 master would rather have their picture at full size than an error.
 
-The browser does the same arithmetic before uploading a character file
-(`src/client/hdc.ts`): the picture inside it is scaled to that same
-`limits.storedImagePx` and encoded as WebP, so the upload is tens of kilobytes
-rather than megabytes. `fitToCard` still runs on what arrives and is unchanged by
-it — an already-small picture passes its "nothing is enlarged" check and is
-returned as it came, which is what keeps the server correct for images arriving
-from anywhere else without a branch for who sent them.
+The browser does the same arithmetic before uploading, in `src/client/images.ts`:
+the picture is scaled to that same `limits.storedImagePx` and encoded as WebP, so
+the upload is tens of kilobytes rather than megabytes. `fitToCard` still runs on
+what arrives and is unchanged by it — an already-small picture passes its
+"nothing is enlarged" check and is returned as it came, which is what keeps the
+server correct for images arriving from anywhere else without a branch for who
+sent them.
+
+**Every way of choosing a picture goes through it**, which is a rule rather than
+an observation: it was the character file's own trick first, and for a while a
+portrait lifted out of a `.hdc` was sized while the same picture chosen as a
+picture was not. That difference is invisible until it is fatal. The ceiling is
+checked as the bytes arrive, before the server has anything to scale, so an
+oversize photograph is *refused* rather than shrunk — and `UPLOAD_LIMIT_BYTES`
+defaults to a megabyte on the grounds that the browser sizes things first. So all
+of it goes one way now: `hdc.ts` for the portrait inside a character file, and
+`useCardImageFit` (both edit dialogs, dropped or picked) and `setCardImage` (a
+picture dropped straight onto a card) for one chosen by hand, campaigns and
+characters alike. `tests/e2e.test.ts` drops a picture past the ceiling through
+all six gestures and holds them together.
 
 **And in the format that holds them in the fewest bytes**, which is rarely the
 one they arrived in: a photograph saved as PNG is lossless data about a lossy

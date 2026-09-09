@@ -23,21 +23,7 @@
  * the shim would be.
  */
 
-import { CARD_IMAGE_PX } from "../lib/cards.ts";
-
-/**
- * The shorter side a portrait is scaled to, matching `limits.storedImagePx` on
- * the server.
- *
- * Twice the largest card a game master can choose, because a 350px card on a 2×
- * screen needs 700 device pixels. The server re-fits whatever arrives and never
- * enlarges, so a picture sized here passes through it untouched — and the two
- * numbers must not drift, which is why this is the same constant.
- */
-const PORTRAIT_PX = CARD_IMAGE_PX.max * 2;
-
-/** What `fitToCard` encodes at, so a picture is not re-compressed to a different one. */
-const WEBP_QUALITY = 0.8;
+import { fitToCard } from "./images.ts";
 
 /** The whole `IMAGE` element, in both the forms an XML writer may produce. */
 const IMAGE_ELEMENT = /[ \t]*<IMAGE\b(?:[^>]*\/>|[^>]*>[\s\S]*?<\/IMAGE>)\r?\n?/;
@@ -140,60 +126,17 @@ function encode(text: string, label: string): Uint8Array {
 }
 
 /**
- * Scales a picture down to the size a card shows it at, and encodes it as WebP.
+ * The portrait out of a character file, sized for the card it is about to
+ * become.
  *
- * The same rule the server applies (`fitToCard`): the shorter side covers the
- * card's square, nothing is cropped, nothing is enlarged. Encoding is left to
- * the browser, which is why the result is checked rather than assumed — WebP
- * from a canvas is not universal, and a browser that will not produce it hands
- * back a PNG instead, which the server is perfectly happy to re-encode.
- *
- * Anything that goes wrong returns the picture as it was. The server re-fits
- * whatever arrives, so the worst case here is a larger upload, never a wrong
- * one.
+ * The picture arrives as bytes rather than as a file — it was never one, it was
+ * base64 inside the XML — so the fallback is built here: the bytes as they were
+ * extracted, under the name the file gave them. `images.ts` does the rest, and
+ * does it identically for a picture the game master chose by hand.
  */
 async function fitPortrait(bytes: Uint8Array, name: string): Promise<File> {
-  const asExtracted = () => new File([bytes as BlobPart], name);
-  try {
-    if (typeof createImageBitmap !== "function" || typeof OffscreenCanvas !== "function") {
-      return asExtracted();
-    }
-
-    const source = await createImageBitmap(new Blob([bytes as BlobPart]));
-    const shorter = Math.min(source.width, source.height);
-    const scale = shorter > PORTRAIT_PX ? PORTRAIT_PX / shorter : 1;
-    const width = Math.round(source.width * scale);
-    const height = Math.round(source.height * scale);
-
-    // `resizeQuality` is the decoder's own resampling, which is better than
-    // drawing a full-size bitmap into a small canvas.
-    const fitted = scale === 1
-      ? source
-      : await createImageBitmap(source, {
-        resizeWidth: width,
-        resizeHeight: height,
-        resizeQuality: "high",
-      });
-
-    const canvas = new OffscreenCanvas(width, height);
-    const context = canvas.getContext("2d");
-    if (!context) return asExtracted();
-    context.drawImage(fitted, 0, 0, width, height);
-
-    const blob = await canvas.convertToBlob({ type: "image/webp", quality: WEBP_QUALITY });
-    source.close();
-    if (fitted !== source) fitted.close();
-
-    // A picture that grew is one the browser has re-compressed badly — an
-    // already-lossy source encoded again. The original stands, as it does on
-    // the server.
-    if (blob.size >= bytes.byteLength) return asExtracted();
-
-    const extension = blob.type === "image/webp" ? "webp" : blob.type.replace("image/", "");
-    return new File([blob], `${name.replace(/\.[^.]+$/, "")}.${extension}`, { type: blob.type });
-  } catch {
-    return asExtracted();
-  }
+  const picture = new Blob([bytes as BlobPart]);
+  return await fitToCard(picture, name, new File([picture], name));
 }
 
 /**
