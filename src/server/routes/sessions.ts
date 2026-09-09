@@ -46,6 +46,7 @@ import {
   actionHeld,
   actionTaken,
   becameStunned,
+  becameUnstunned,
   gmAddedToScene,
   gmAssigned,
   gmKicked,
@@ -238,6 +239,72 @@ function sceneName(sessionId: string, slotId: string): string | null {
 }
 
 /**
+ * What one step of the clock leaves behind for the screens to be told about.
+ *
+ * Both of these are things the rules did rather than things the game master
+ * asked for, which is why they come back out rather than being toasted from in
+ * here: the convention everywhere in this file is that a screen has the new
+ * snapshot in hand before it is told why the numbers moved, and only the route
+ * knows when it has published one.
+ */
+type TurnStep = {
+  /**
+   * Whether the step finished Segment 12 — whether, in other words, the stage
+   * has just taken its Post-Segment 12 Recovery.
+   */
+  recovered: boolean;
+  /**
+   * Who shook off Stunned by coming up on turn, and who is playing them. Null on
+   * nearly every step: at most one character can arrive on turn at a time, and
+   * most of them are not stunned when they do.
+   */
+  unstunned: { character: string; playerId: string | null } | null;
+};
+
+/** Nothing to say. The answer to most steps, and to every one that moves nobody. */
+const QUIET: TurnStep = { recovered: false, unstunned: null };
+
+/**
+ * A character coming up on turn, and the stun going off them.
+ *
+ * Being stunned in HERO costs a character their next phase and ends with it, so
+ * the clock arriving on them is the whole of the ruling — there is nothing for
+ * anybody to press. Done on the server for the reason `consequencesOfTheHit` is:
+ * it is a rule about the fight rather than about a screen, and a game master's
+ * tab and a player's must not be able to disagree about whether it happened.
+ *
+ * Unconscious holds it in place. A character who is out cold is not taking their
+ * phase to shake anything off, and clearing the tag under them would leave the
+ * game master looking at a row that had quietly recovered from the smaller of
+ * its two problems while the larger one was still there.
+ *
+ * Answers null when there was nothing to do, which is nearly every phase of
+ * nearly every fight.
+ */
+function shakeOffStun(
+  sessionId: string,
+  slotId: string,
+): TurnStep["unstunned"] {
+  if (!sessionCharacters.hasTag(sessionId, slotId, "stunned")) return null;
+  if (sessionCharacters.hasTag(sessionId, slotId, "unconscious")) return null;
+
+  const slot = slotOnStage(sessionId, slotId);
+  if (!slot) return null;
+
+  // Taken off with `setTag`, exactly as the button does it, so a game master who
+  // disagrees can put it straight back the way they take off any other.
+  sessionCharacters.setTag(sessionId, slotId, "stunned", false);
+
+  const named = nameOf(slot);
+  sessionEvents.record(sessionId, becameUnstunned(named));
+
+  // `slot.id` is the character's, and a claim is on a character rather than on a
+  // slot — the same reading `consequencesOfTheHit` makes. Null for a monster
+  // nobody is playing, which leaves the game master the only one told.
+  return { character: named, playerId: players.holderOf(sessionId, slot.id)?.id ?? null };
+}
+
+/**
  * Moves the turn marker one phase through the HERO clock.
  *
  * A Turn is twelve segments, and which of them a character acts in is their SPD
@@ -255,13 +322,14 @@ function sceneName(sessionId: string, slotId: string): string | null {
  * All of it is computed here from the stored state rather than in the browser, so
  * two game master tabs cannot disagree about where in the turn the fight is.
  *
- * Answers whether the step finished Segment 12 — whether, in other words, the
- * stage has just taken its Post-Segment 12 Recovery — so the caller can say so
- * on the screens. Stepping back never gives it: `Previous` retraces the path,
- * and a Recovery already taken is not untaken by the game master correcting a
- * click. Where the fight is left is the same either way.
+ * Answers with whatever the rules did on the way — the Post-Segment 12 Recovery,
+ * and the stun coming off whoever the marker landed on — so the caller can say
+ * so on the screens. Stepping back gives neither: `Previous` retraces the path,
+ * and a Recovery already taken is not untaken, nor a character re-stunned, by
+ * the game master correcting a click. Where the fight is left is the same either
+ * way.
  */
-function advanceTurn(sessionId: string, direction: "next" | "prev"): boolean {
+function advanceTurn(sessionId: string, direction: "next" | "prev"): TurnStep {
   const session = gameSessions.byId(sessionId)!;
   const stage = sessionCharacters.list(sessionId);
 
@@ -287,7 +355,7 @@ function advanceTurn(sessionId: string, direction: "next" | "prev"): boolean {
     session.turn === 1 &&
     session.segment === OPENING_SEGMENT
   ) {
-    return false;
+    return QUIET;
   }
 
   // A held action taken out of order is an interruption, and the step out of one
@@ -299,8 +367,21 @@ function advanceTurn(sessionId: string, direction: "next" | "prev"): boolean {
   if (session.resume_slot_id) {
     gameSessions.setTurn(sessionId, session.resume_slot_id, session.turn, session.segment);
     gameSessions.setResume(sessionId, null);
-    return false;
+    // No stun comes off here. The character being returned to is one whose phase
+    // was interrupted rather than one whose phase is beginning — they were on
+    // turn already, and whatever the arrival owed them was paid then.
+    return QUIET;
   }
+
+  /**
+   * The marker landing on somebody, and the one rule that fires when it does.
+   *
+   * Only going forwards. Stepping back is the game master correcting a click,
+   * not the fight taking its phases again, and a `Previous` that handed a
+   * character their stun back would make the button a different thing.
+   */
+  const arriveOn = (slotId: string): TurnStep["unstunned"] =>
+    direction === "next" ? shakeOffStun(sessionId, slotId) : null;
 
   const step = direction === "next" ? 1 : -1;
   const here = actorsIn(stage, session.segment);
@@ -316,8 +397,9 @@ function advanceTurn(sessionId: string, direction: "next" | "prev"): boolean {
   if (index !== -1) {
     const withinSegment = index + step;
     if (withinSegment >= 0 && withinSegment < here.length) {
-      gameSessions.setTurn(sessionId, here[withinSegment]!.slot_id, session.turn, session.segment);
-      return false;
+      const slotId = here[withinSegment]!.slot_id;
+      gameSessions.setTurn(sessionId, slotId, session.turn, session.segment);
+      return { recovered: false, unstunned: arriveOn(slotId) };
     }
 
     // Stepping back off the very first phase of the fight. There is nothing
@@ -326,7 +408,7 @@ function advanceTurn(sessionId: string, direction: "next" | "prev"): boolean {
     // not happened.
     if (direction === "prev" && session.turn === 1 && session.segment === OPENING_SEGMENT) {
       gameSessions.setTurn(sessionId, null, 1, OPENING_SEGMENT);
-      return false;
+      return QUIET;
     }
   } else if (here.length > 0) {
     // No marker, but this segment has phases in it: take the end the direction
@@ -337,7 +419,7 @@ function advanceTurn(sessionId: string, direction: "next" | "prev"): boolean {
     // segment as they set it, so the first press of Next is only the marker
     // arriving at the first character of a segment already begun.
     gameSessions.setTurn(sessionId, entry.slot_id, session.turn, session.segment);
-    return false;
+    return { recovered: false, unstunned: arriveOn(entry.slot_id) };
   }
 
   // Off the end of the segment, so walk the clock to the next one anybody acts
@@ -376,10 +458,54 @@ function advanceTurn(sessionId: string, direction: "next" | "prev"): boolean {
     // leaves where it was, so there is no new segment for it to announce.
     sessionEvents.record(sessionId, segmentBegan(turn, segment));
     gameSessions.setTurn(sessionId, entry.slot_id, turn, segment);
-    return recovered;
+    // After the segment line, so the log reads in the order it happened: the
+    // fight reaching the segment, and then what the character arriving in it
+    // shook off on the way.
+    return { recovered, unstunned: arriveOn(entry.slot_id) };
   }
 
-  return recovered;
+  return { recovered, unstunned: null };
+}
+
+/**
+ * Says on the screens what the clock just did, once the snapshot is out.
+ *
+ * Both routes that move the marker say the same things in the same order, and
+ * the order is the one they happened in: the stage's Recovery is the clock's own
+ * news and goes to the whole table, and then whoever came up on turn shook the
+ * stun off, which is two people's news and goes to the two of them.
+ *
+ * The player and the game master are told separately because they are told
+ * different sentences. A player is looking at one character and reads about
+ * themselves; a game master is looking at eight and needs to know which. Said in
+ * one line to both, one of them would be reading the wrong half of it.
+ *
+ * `success` rather than the `error` a stunning gets: it is the same pair of
+ * screens, and the opposite piece of news.
+ */
+function announceTurnStep(sessionId: string, step: TurnStep): void {
+  if (step.recovered) broadcastSessionNotice(sessionId, POST_SEGMENT_12_NOTICE);
+
+  const { unstunned } = step;
+  if (!unstunned) return;
+
+  // Nobody to tell for a monster the game master is running themselves, and
+  // nothing to say to them: the line below is already about that character.
+  if (unstunned.playerId !== null) {
+    sendSessionNotice(
+      sessionId,
+      "You are becoming unstunned.",
+      { playerId: unstunned.playerId, gm: false },
+      "success",
+    );
+  }
+
+  sendSessionNotice(
+    sessionId,
+    `${unstunned.character} is becoming unstunned.`,
+    { playerId: null },
+    "success",
+  );
 }
 
 /* ------------------------------------------------------------------- routes */
@@ -777,7 +903,7 @@ export const sessionRoutes = {
         // saying what that character will do when their turn comes, and must not
         // cost whoever is up their phase.
         const passed = changed && held && session.active_slot_id === slotId;
-        const recovered = passed ? advanceTurn(session.id, "next") : false;
+        const step = passed ? advanceTurn(session.id, "next") : QUIET;
 
         logger.info("hold set", {
           sessionId: session.id,
@@ -791,8 +917,9 @@ export const sessionRoutes = {
         const response = publish(session.id);
 
         // After the snapshot, as the advance route does it: a screen has the
-        // recovered numbers in hand before it is told why they moved.
-        if (recovered) broadcastSessionNotice(session.id, POST_SEGMENT_12_NOTICE);
+        // recovered numbers in hand, and the pills off the row, before it is
+        // told why they moved.
+        announceTurnStep(session.id, step);
 
         return response;
       },
@@ -825,14 +952,19 @@ export const sessionRoutes = {
         const { session } = requireOwnedActiveSession(request, request.params.id);
         const { direction } = await parseJsonBody(request, schemas.advanceTurn);
 
-        const recovered = advanceTurn(session.id, direction);
-        logger.info("turn advanced", { sessionId: session.id, direction, recovered });
+        const step = advanceTurn(session.id, direction);
+        logger.info("turn advanced", {
+          sessionId: session.id,
+          direction,
+          recovered: step.recovered,
+          unstunned: step.unstunned?.character ?? null,
+        });
 
         const response = publish(session.id);
 
-        // After the snapshot, so a screen has the recovered numbers in hand
-        // before it is told why they moved.
-        if (recovered) broadcastSessionNotice(session.id, POST_SEGMENT_12_NOTICE);
+        // After the snapshot, so a screen has the recovered numbers in hand, and
+        // the pills off the row, before it is told why they moved.
+        announceTurnStep(session.id, step);
 
         return response;
       },

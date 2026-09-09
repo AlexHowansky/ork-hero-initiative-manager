@@ -9,7 +9,7 @@
 
 import { beforeEach, describe, expect, test } from "bun:test";
 import { gameSessions, players, sessionCharacters, sessionEvents } from "../src/db/queries.ts";
-import { segmentBegan } from "../src/server/events.ts";
+import { becameUnstunned, segmentBegan } from "../src/server/events.ts";
 import { advanceTurn } from "../src/server/routes/sessions.ts";
 import {
   copiesOf,
@@ -502,8 +502,8 @@ describe("advancing the turn", () => {
         .map((row) => [row.name, row.cur_endurance, row.cur_stun]);
 
     // Segment 12 itself is not the moment: both of them act in it first.
-    expect(advanceTurn(session.id, "next")).toBe(false);
-    expect(advanceTurn(session.id, "next")).toBe(false);
+    expect(advanceTurn(session.id, "next").recovered).toBe(false);
+    expect(advanceTurn(session.id, "next").recovered).toBe(false);
     expect(vitals()).toEqual([
       ["Scrapper", 15, 2],
       ["Bruiser", 10, 4],
@@ -511,7 +511,7 @@ describe("advancing the turn", () => {
 
     // And the step that leaves segment 12 behind is. Scrapper's END stops at its
     // total rather than going five over it.
-    expect(advanceTurn(session.id, "next")).toBe(true);
+    expect(advanceTurn(session.id, "next").recovered).toBe(true);
     expect(gameSessions.byId(session.id)!.turn).toBe(2);
     expect(vitals()).toEqual([
       ["Scrapper", 20, 10],
@@ -519,7 +519,7 @@ describe("advancing the turn", () => {
     ]);
 
     // The segments in between are just segments.
-    expect(advanceTurn(session.id, "next")).toBe(false);
+    expect(advanceTurn(session.id, "next").recovered).toBe(false);
     expect(vitals()).toEqual([
       ["Scrapper", 20, 10],
       ["Bruiser", 15, 9],
@@ -541,11 +541,11 @@ describe("advancing the turn", () => {
     sessionCharacters.setVitals(session.id, slot, { endurance: 10, stun: 4 });
 
     advanceTurn(session.id, "next");
-    expect(advanceTurn(session.id, "next")).toBe(true);
+    expect(advanceTurn(session.id, "next").recovered).toBe(true);
 
     // Back where it was on the clock, with the Recovery it has already taken:
     // `Previous` is the game master correcting a click, not time running backwards.
-    expect(advanceTurn(session.id, "prev")).toBe(false);
+    expect(advanceTurn(session.id, "prev").recovered).toBe(false);
     expect(gameSessions.byId(session.id)!.segment).toBe(12);
     const row = sessionCharacters.list(session.id)[0]!;
     expect([row.cur_endurance, row.cur_stun]).toEqual([15, 9]);
@@ -565,5 +565,133 @@ describe("advancing the turn", () => {
     sessionCharacters.add(session.id, blank.id, "npc");
 
     expect(() => advanceTurn(session.id, "next")).toThrow(/SPD above zero/);
+  });
+});
+
+/**
+ * The one thing that happens to a character purely by the clock reaching them.
+ *
+ * Being stunned in HERO costs a character their next phase and ends with it, so
+ * there is no button for this anywhere in the app: the game master presses Next
+ * and the tag is gone. The route that toasts it is covered in `http.test.ts`;
+ * these are the rules the clock itself applies.
+ */
+describe("coming up on turn while stunned", () => {
+  /** One character, one phase per segment, and stunned when the fight opens. */
+  const stunnedSolo = (extraTags: string[] = []) => {
+    const { session, campaign } = makeSession(0);
+    const character = makeCharacter(campaign.id, "pc", "Ace", { speed: 12, dexterity: 20 });
+    sessionCharacters.add(session.id, character.id, "pc");
+    const slot = slotsOf(session.id)[0]!;
+    sessionCharacters.setTag(session.id, slot, "stunned", true);
+    for (const tag of extraTags) sessionCharacters.setTag(session.id, slot, tag, true);
+    return { session, character, slot };
+  };
+
+  const isStunned = (sessionId: string, slot: string) =>
+    sessionCharacters.hasTag(sessionId, slot, "stunned");
+
+  test("the stun comes off, and the log says so", () => {
+    const { session, slot } = stunnedSolo();
+
+    const step = advanceTurn(session.id, "next");
+
+    expect(isStunned(session.id, slot)).toBe(false);
+    expect(step.unstunned).toEqual({ character: "Ace", playerId: null });
+    expect(sessionEvents.list(session.id).map((event) => event.message))
+      .toContain(becameUnstunned("Ace"));
+  });
+
+  test("a character nobody is playing has no player to tell", () => {
+    const { session } = stunnedSolo();
+    makePlayer(session.id);
+
+    // A player at the table who has claimed nothing is not this character's,
+    // and the game master is left the only one told.
+    expect(advanceTurn(session.id, "next").unstunned!.playerId).toBeNull();
+  });
+
+  test("the player holding the character is the one told", () => {
+    const { session, character } = stunnedSolo();
+    const player = makePlayer(session.id);
+    players.setClaim(player.id, character.id);
+
+    expect(advanceTurn(session.id, "next").unstunned!.playerId).toBe(player.id);
+  });
+
+  test("an unconscious character keeps it", () => {
+    const { session, slot } = stunnedSolo(["unconscious"]);
+
+    const step = advanceTurn(session.id, "next");
+
+    // Out cold is not a phase spent shaking anything off, and a row that had
+    // quietly recovered from the smaller of its two problems would mislead.
+    expect(step.unstunned).toBeNull();
+    expect(isStunned(session.id, slot)).toBe(true);
+    expect(sessionEvents.list(session.id).map((event) => event.message))
+      .not.toContain(becameUnstunned("Ace"));
+  });
+
+  test("stepping back does not hand the stun back", () => {
+    const { session, slot } = stunnedSolo();
+    advanceTurn(session.id, "next");
+    advanceTurn(session.id, "next");
+    sessionCharacters.setTag(session.id, slot, "stunned", true);
+
+    // `Previous` is the game master correcting a click rather than the fight
+    // taking its phases again, so it applies no rule on the way.
+    const step = advanceTurn(session.id, "prev");
+
+    expect(step.unstunned).toBeNull();
+    expect(isStunned(session.id, slot)).toBe(true);
+  });
+
+  test("it happens once, on the phase the clock reaches", () => {
+    const { session, campaign } = makeSession(0);
+    // SPD 2 acts in segments 6 and 12; Quick leads segment 12 on DEX.
+    const plodder = makeCharacter(campaign.id, "npc", "Plodder", { speed: 2, dexterity: 10 });
+    const quick = makeCharacter(campaign.id, "npc", "Quick", { speed: 2, dexterity: 30 });
+    sessionCharacters.add(session.id, plodder.id, "npc");
+    sessionCharacters.add(session.id, quick.id, "npc");
+
+    const slotOf = (name: string) =>
+      sessionCharacters.list(session.id).find((row) => row.name === name)!.slot_id;
+    sessionCharacters.setTag(session.id, slotOf("Plodder"), "stunned", true);
+
+    // Quick's phase is not Plodder's, and leaves the tag where it is.
+    expect(advanceTurn(session.id, "next").unstunned).toBeNull();
+    expect(isStunned(session.id, slotOf("Plodder"))).toBe(true);
+
+    expect(advanceTurn(session.id, "next").unstunned?.character).toBe("Plodder");
+    expect(isStunned(session.id, slotOf("Plodder"))).toBe(false);
+
+    // And the next phase along has nothing left to take off.
+    expect(advanceTurn(session.id, "next").unstunned).toBeNull();
+  });
+
+  test("returning from a held action is not a phase beginning", () => {
+    const { session, campaign } = makeSession(0);
+    const cast = [
+      makeCharacter(campaign.id, "npc", "Ace", { speed: 12, dexterity: 30 }),
+      makeCharacter(campaign.id, "npc", "Slow", { speed: 12, dexterity: 10 }),
+    ];
+    for (const character of cast) sessionCharacters.add(session.id, character.id, "npc");
+
+    const slotOf = (name: string) =>
+      sessionCharacters.list(session.id).find((row) => row.name === name)!.slot_id;
+
+    // Ace is up, and Slow cuts into their phase with a held action.
+    advanceTurn(session.id, "next");
+    gameSessions.setResume(session.id, slotOf("Ace"));
+    gameSessions.setTurn(session.id, slotOf("Slow"), 1, 12);
+
+    // Ace is stunned mid-interjection. The step out of it returns to the phase
+    // Ace had already begun rather than starting them a new one, so it applies
+    // nothing; the tag waits for the phase that is really theirs.
+    sessionCharacters.setTag(session.id, slotOf("Ace"), "stunned", true);
+    const step = advanceTurn(session.id, "next");
+
+    expect(step.unstunned).toBeNull();
+    expect(isStunned(session.id, slotOf("Ace"))).toBe(true);
   });
 });

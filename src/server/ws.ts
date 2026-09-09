@@ -113,17 +113,25 @@ export type NoticeTone = "error" | "success" | "info";
  * `disconnectPlayer` walks this set. `playerId` is null where nobody holds the
  * character, which leaves the game master told and is right: an unclaimed
  * monster has no player to tell.
+ *
+ * `gm` is how a caller drops the other half of that pair. It defaults to true,
+ * because both being told is the ordinary case and every caller that wants it
+ * should not have to say so. It is set false where the same news has to be put
+ * two different ways — a player reads `You are becoming unstunned`, where the
+ * game master reads which of the eight characters in front of them it was — and
+ * so goes out as two notices rather than one, each to the screen it is written
+ * for.
  */
 export function sendSessionNotice(
   sessionId: string,
   message: string,
-  to: { playerId: string | null },
+  to: { playerId: string | null; gm?: boolean },
   tone?: NoticeTone,
 ): void {
   const frame = JSON.stringify({ type: "notice", message, tone });
   for (const socket of sockets) {
     if (socket.data.sessionId !== sessionId) continue;
-    const wanted = socket.data.role === "gm"
+    const wanted = (socket.data.role === "gm" && to.gm !== false)
       || (to.playerId !== null && socket.data.playerId === to.playerId);
     if (wanted) socket.send(frame);
   }

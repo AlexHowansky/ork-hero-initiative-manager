@@ -479,6 +479,21 @@ The app should have the following features:
   for the reason a character with no CONSTITUTION is never stunned: they start at
   nought because nobody filled them in, not because they are down.
 
+* Stunned is also the one condition the app takes *off* by itself. Being stunned
+  in HERO costs a character their next phase and ends with it, so when the turn
+  marker arrives on a stunned character the tag comes off, and the log says
+  `<character> has become unstunned` — another line with no actor in it, because
+  the clock reaching them is the whole of the ruling and the game master who
+  pressed `Next` did not decide it. It is the one line about a condition with no
+  pill in it: the sentence names the end of the condition rather than the
+  condition, and a Stunned pill inside it would say the opposite of the line it
+  sat in. A character who is also Unconscious keeps it — being out cold is not a
+  phase spent shaking anything off — and `Previous` never hands it back, for the
+  reason it never untakes a Recovery: it is the game master correcting a click,
+  not the fight taking its phases again. Nor does the step out of a held action
+  that cut into somebody's phase, which returns to a character who was on turn
+  already rather than starting them a new phase.
+
 * A known condition is drawn as its icon alone, with its name on hover and for a
   screen reader; a typed one keeps its word, since no picture would say it. A row
   already carries a name, a kind, a count and five characteristics, and nine
@@ -600,6 +615,14 @@ The app should have the following features:
   character and not their numbers — and a monster nobody is playing is news for
   the game master alone. It arrives in the tone of something gone wrong rather
   than in the green the Post-Segment 12 Recovery uses.
+
+* A character shaking the stun off on their phase goes to the same two screens,
+  in the green rather than the red — it is the opposite piece of news. It is the
+  one thing said to the two of them in two different sentences: the player reads
+  `You are becoming unstunned.`, because they are looking at one character, and
+  the game master reads `<character> is becoming unstunned.`, because they are
+  looking at eight and need to know which. Said in one sentence to both, one of
+  them would be reading the wrong half of it.
 
 ## Conclusion
 

@@ -163,6 +163,22 @@ export const becameStunned = (character: string): string =>
 export const knockedOut = (character: string): string =>
   `${character} has had STUN reduced to zero ${markTag(STATUS_TAG_LABELS.unconscious)}`;
 
+/**
+ * A character shaking off the stun by coming up on turn.
+ *
+ * The third line the rules write for themselves, and the first of them that is
+ * good news. Nobody decided it either: being stunned costs a character their
+ * next phase and ends with it, so the clock arriving on them is the whole of the
+ * ruling, and naming the game master who pressed Next would credit them with it.
+ *
+ * The one line about a condition with no `markTag` in it. Every other one names
+ * the condition and so draws it as the pill on the character's row; this one
+ * names the end of it, and a Stunned pill in a sentence saying the character is
+ * no longer stunned would say the opposite of the line it sits in.
+ */
+export const becameUnstunned = (character: string): string =>
+  `${character} has become unstunned`;
+
 /* ------------------------------------------------------------- the clock's */
 
 /**
