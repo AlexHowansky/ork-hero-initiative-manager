@@ -27,19 +27,19 @@
     "@fortawesome/free-solid-svg-icons": "^7.3.1",
     "@fortawesome/react-fontawesome": "^3.5.0",
     "bun-plugin-tailwind": "^0.0.15",
-    "daisyui": "^5.7.28",
+    "daisyui": "^5.7.32",
     "ork-hero-export-renderer": "^0.9.0",
-    "react": "^19.2.8",
-    "react-dom": "^19.2.8",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "react-router": "^7.18.3",
     "sharp": "^0.35.4",
     "tailwindcss": "^4.3.3",
-    "zod": "^4.5.4"
+    "zod": "^4.6.1"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.7",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "playwright": "^1.63.0",
     "typescript": "^5.9.3"
   }
