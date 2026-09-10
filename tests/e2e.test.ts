@@ -2065,12 +2065,18 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
       card.evaluate((el) => ({
         tile: getComputedStyle(el.querySelector(".card")!).transform,
         actions: getComputedStyle(el.querySelector(".card-actions-3d")!).transform,
+        opacity: getComputedStyle(el.querySelector(".card-actions-3d")!).opacity,
       }));
 
-    // Untouched, both are flat.
+    // Untouched, both are flat, and the controls are out of sight until the card
+    // is hovered. Off the card and given time to settle first: the dialog that
+    // created the campaign may have left the pointer over it.
+    await gm.mouse.move(0, 0);
+    await gm.waitForTimeout(800);
     const resting = await transforms();
     expect(resting.tile).toBe("matrix(1, 0, 0, 1, 0, 0)");
     expect(resting.actions).toBe(resting.tile);
+    expect(resting.opacity).toBe("0");
 
     // Hovered in a corner, the controls take the card's own rotation — exactly,
     // which is what stops them sliding across the face they are printed on. The
@@ -2081,6 +2087,7 @@ describe.skipIf(!process.env.CI && !process.env.E2E)("in a real browser", () => 
     const tilted = await transforms();
     expect(tilted.tile).toStartWith("matrix3d(");
     expect(tilted.actions).toBe(tilted.tile);
+    expect(tilted.opacity).toBe("1");
 
     // And the whole point: a control is still a control at that angle.
     await card.getByRole("button", { name: `Edit ${campaignName}` }).click();

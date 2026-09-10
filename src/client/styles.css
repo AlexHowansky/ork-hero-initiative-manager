@@ -500,6 +500,32 @@ body {
 }
 
 /*
+  The corner controls stay out of the picture until the card is attended to: a
+  library full of cards is a wall of artwork with three glyphs on every one, and
+  only the card under the pointer is the card they could be meant for. So they
+  fade in with the tilt, on the same 0.25s the flip fades them out with.
+
+  Focus counts as well as hover — the same pair `onAttention` listens for — so a
+  game master tabbing through the library finds the controls on the card they
+  have reached, and tabbing onto a control is never tabbing onto something
+  invisible. `:not(.is-hidden)` keeps the flip's say: a card turned over has no
+  controls on it, hovered or not.
+
+  Only where there is a hover to be had. On a touch screen nothing is ever under
+  the pointer until it has already been pressed, and controls that appeared only
+  then would be controls nobody could aim at, so there they stay as they were.
+*/
+@media (hover: hover) {
+  .card-actions-3d {
+    opacity: 0;
+  }
+
+  .card-3d:is(:hover, :focus-within) .card-actions-3d:not(.is-hidden) {
+    opacity: 1;
+  }
+}
+
+/*
   Turning a card over.
 
   The flip cannot go on the tile. `hover-3d` owns that element's `transform` —
