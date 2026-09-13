@@ -17,7 +17,7 @@
  * the fight is on, or hiding them outright when the reader asks for that.
  */
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SessionCharacter } from "../types.ts";
 import { faOctagon, faPlay, faXmark } from "@fortawesome/free-solid-svg-icons";
 import { actsIn } from "../../lib/hero.ts";
@@ -55,6 +55,8 @@ interface RowProps {
   /** Whether this character has a phase in the segment the fight is on. */
   isActing: boolean;
   editable: boolean;
+  /** Scroll this row into view when the turn comes to it. */
+  followTurn: boolean;
   /** Marks the viewing player's own character in the association line. */
   isYours: boolean;
   /**
@@ -89,6 +91,7 @@ function Row({
   isActive,
   isActing,
   editable,
+  followTurn,
   isYours,
   onSetVitals,
   onRecover,
@@ -101,6 +104,18 @@ function Row({
   // The picker belongs to the row that opened it, the way the numbers' own
   // picker belongs to the box that opened it.
   const [taggingOpen, setTaggingOpen] = useState(false);
+
+  // When the turn passes to this row, bring it into view: on a full stage the
+  // character on turn is otherwise easily below the fold of the panel. Keyed on
+  // `isActive` alone, so a change to the numbers on the row that already has
+  // the turn leaves the reader's scroll where they put it. `nearest` does
+  // nothing to a row that is already on screen.
+  const rowRef = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (!followTurn || !isActive) return;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    rowRef.current?.scrollIntoView({ block: "nearest", behavior: reduceMotion ? "auto" : "smooth" });
+  }, [followTurn, isActive]);
 
   // A player character nobody has taken yet: an open seat at the table, and the
   // one thing both audiences want to spot without reading.
@@ -120,6 +135,7 @@ function Row({
 
   return (
     <li
+      ref={rowRef}
       // The active turn is marked by a heavy left border and bolder text as well
       // as colour, so it reads in both themes and without colour vision. The
       // turn keeps the border when a row is both on turn and unclaimed — the
@@ -414,6 +430,7 @@ export function InitiativeList({
   showActingOnly = false,
   activeSlotId,
   editable = false,
+  followTurn = false,
   yourCharacterId = null,
   onSetVitals,
   onRecover,
@@ -431,6 +448,12 @@ export function InitiativeList({
   /** The slot whose turn it is. A slot, not a character: one may fill two. */
   activeSlotId: string | null;
   editable?: boolean;
+  /**
+   * Scroll the row on turn into view whenever the turn moves. The game master's
+   * console asks for it; a player's scene does not, since their scroll position
+   * is theirs and the turn banner already names who is acting.
+   */
+  followTurn?: boolean;
   /** The viewing player's character, matched on the character rather than the slot. */
   yourCharacterId?: string | null;
   /**
@@ -484,6 +507,7 @@ export function InitiativeList({
         isActive={character.id === activeSlotId}
         isActing={isActing}
         editable={editable}
+        followTurn={followTurn}
         // On the character: a player's own PC is theirs wherever it stands.
         isYours={character.characterId === yourCharacterId}
         onSetVitals={onSetVitals ? (patch) => onSetVitals(character.id, patch) : undefined}

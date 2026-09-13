@@ -562,6 +562,7 @@ export function GmSessionConsole({ onSignOut }: { onSignOut: () => void }) {
               showActingOnly={showActingOnly}
               activeSlotId={snapshot.session.activeSlotId}
               editable
+              followTurn
               onSetVitals={(id, patch) => void setVitals(id, patch)}
               onRecover={(id) => void recover(id)}
               onRest={(id) => void rest(id)}
