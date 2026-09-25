@@ -27,14 +27,14 @@
     "@fortawesome/free-solid-svg-icons": "^7.3.1",
     "@fortawesome/react-fontawesome": "^3.5.0",
     "bun-plugin-tailwind": "^0.0.15",
-    "daisyui": "^5.7.32",
+    "daisyui": "^5.7.46",
     "ork-hero-export-renderer": "^0.9.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "react-router": "^7.18.3",
+    "react-router": "^7.18.4",
     "sharp": "^0.35.4",
     "tailwindcss": "^4.3.3",
-    "zod": "^4.6.1"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/bun": "^1.4.2",
