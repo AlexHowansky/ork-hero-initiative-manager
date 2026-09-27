@@ -267,7 +267,7 @@ export const uploads = {
       SELECT * FROM uploads
       WHERE id NOT IN (SELECT card_upload_id FROM campaigns WHERE card_upload_id IS NOT NULL)
         AND id NOT IN (SELECT card_upload_id FROM characters WHERE card_upload_id IS NOT NULL)
-        AND id NOT IN (SELECT sheet_upload_id FROM characters)
+        AND id NOT IN (SELECT sheet_upload_id FROM characters WHERE sheet_upload_id IS NOT NULL)
     `).all();
   },
 };
@@ -475,7 +475,7 @@ export const characters = {
     campaignId: string;
     kind: CharacterKind;
     name: string;
-    sheetUploadId: string;
+    sheetUploadId: string | null;
     cardUploadId: string | null;
     /** The HERO characteristics, each defaulting to the zero the column carries. */
     stats?: Partial<HeroStats>;

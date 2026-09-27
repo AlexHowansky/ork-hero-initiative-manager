@@ -1,9 +1,11 @@
 /**
  * Character library. Game master only.
  *
- * A character is a name plus an uploaded HERO Designer character file (`.hdc`),
- * filed under exactly one campaign. The sheet a game master looks at is rendered
- * from that file on demand by routes/files.ts; nothing stores it.
+ * A character is a name and its characteristics, filed under exactly one
+ * campaign, usually with an uploaded HERO Designer character file (`.hdc`). The
+ * sheet a game master looks at is rendered from that file on demand by
+ * routes/files.ts; nothing stores it. A character filed without a file has no
+ * sheet until one is attached.
  */
 
 import type { BunRequest } from "bun";
@@ -146,20 +148,21 @@ export const characterRoutes = {
         throw errors.conflict(`This campaign already has a character called “${input.name}”.`);
       }
 
+      // Optional. A character typed straight into the dialog is filed from the
+      // form alone, and has no sheet until a file is attached to it later.
       const sheetFile = fileField(form, "sheet");
-      if (!sheetFile) {
-        throw errors.badRequest("Please choose a HERO Designer character file to upload.");
-      }
       // An image the game master chose wins; otherwise the character file's own
       // portrait stands, whether it arrives beside the file or still inside it.
       const imageFile = fileField(form, "card");
       const portraitFile = fileField(form, "sheetPortrait");
       requireTotalWithinLimit(sheetFile, imageFile, portraitFile);
 
-      const sheet = await storeSheet(sheetFile);
+      const sheet = sheetFile ? await storeSheet(sheetFile) : null;
       const card = imageFile
         ? await storeImage(imageFile)
-        : await portraitOrNone(sheet, portraitFile, logger);
+        : sheet
+          ? await portraitOrNone(sheet, portraitFile, logger)
+          : null;
 
       // What the form said, over what the character file says about itself.
       //
@@ -172,12 +175,13 @@ export const characterRoutes = {
       // zero across the board until now, and every number needed typing in
       // afterwards — from the same file that was already on disk.
       const typed = statsFromForm(form);
-      const stats = { ...withinBounds(await statsFromSheet(sheet)), ...typed };
+      const fromSheet = sheet ? withinBounds(await statsFromSheet(sheet)) : {};
+      const stats = { ...fromSheet, ...typed };
       const character = characters.create({
         campaignId: input.campaignId,
         kind: input.kind,
         name: input.name,
-        sheetUploadId: sheet.id,
+        sheetUploadId: sheet?.id ?? null,
         cardUploadId: card?.id ?? null,
         stats,
       });

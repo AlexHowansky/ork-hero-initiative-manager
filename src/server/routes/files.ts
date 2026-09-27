@@ -80,6 +80,12 @@ export const fileRoutes = {
 
       if (!allowed) throw errors.notFound("We couldn't find that character sheet.");
 
+      if (!character.sheet_upload_id) {
+        throw errors.notFound(
+          "This character has no character file yet. Upload their .hdc file to see their sheet.",
+        );
+      }
+
       const upload = uploads.byId(character.sheet_upload_id);
       if (!upload) throw errors.notFound("That character sheet is no longer available.");
 

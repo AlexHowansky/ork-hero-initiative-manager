@@ -3789,3 +3789,70 @@ describe.skipIf(!rulesAvailable)("a character file dropped over a character that
     expect(gained.cardUrl).not.toBeNull();
   });
 });
+
+describe("a character without a character file", () => {
+  async function addBare(cookie: string, campaignId: string, fields: Record<string, string | File>) {
+    const form = new FormData();
+    form.set("campaignId", campaignId);
+    form.set("kind", "npc");
+    form.set("name", unique("Goblin"));
+    for (const [key, value] of Object.entries(fields)) form.set(key, value);
+    return fetch(`${base}/api/characters`, authed(cookie, { method: "POST", body: form }));
+  }
+
+  test("is filed from the form alone, with the numbers it was given", async () => {
+    const { cookie } = await signIn();
+    const { campaign } = await makeTable(cookie);
+
+    const response = await addBare(cookie, campaign.id, { speed: "3", stun: "20", body: "10" });
+    expect(response.status).toBe(201);
+    const { character } = await response.json();
+    expect(character).toMatchObject({ speed: 3, stun: 20, body: 10, sheetUrl: null, cardUrl: null });
+  });
+
+  test("has no sheet to open", async () => {
+    const { cookie } = await signIn();
+    const { campaign } = await makeTable(cookie);
+    const { character } = await (await addBare(cookie, campaign.id, {})).json();
+
+    const response = await fetch(`${base}/characters/${character.id}`, authed(cookie));
+    expect(response.status).toBe(404);
+    expect((await response.json()).error.message).toMatch(/\.hdc/);
+  });
+
+  test("gains a sheet when a file is attached later", async () => {
+    const { cookie } = await signIn();
+    const { campaign } = await makeTable(cookie);
+    const { character } = await (await addBare(cookie, campaign.id, {})).json();
+
+    const form = new FormData();
+    form.set("sheet", hdcFile());
+    const updated = (await (await fetch(
+      `${base}/api/characters/${character.id}`,
+      authed(cookie, { method: "PATCH", body: form }),
+    )).json()).character;
+    expect(updated.sheetUrl).toBe(`/characters/${character.id}`);
+
+    const sheet = await fetch(base + updated.sheetUrl, authed(cookie));
+    expect(sheet.status).toBe(200);
+  });
+
+  test("does not stop a replaced picture from being cleaned up", async () => {
+    const { cookie } = await signIn();
+    const { campaign } = await makeTable(cookie);
+    const { character } = await (
+      await addBare(cookie, campaign.id, { card: cardImage(71) })
+    ).json();
+    const oldId = character.cardUrl.split("/").pop();
+
+    // `NOT IN` over a list holding a NULL matches nothing, so a sheetless
+    // character in the library must not keep every unused upload alive.
+    const form = new FormData();
+    form.set("card", cardImage(72));
+    await fetch(
+      `${base}/api/characters/${character.id}`,
+      authed(cookie, { method: "PATCH", body: form }),
+    );
+    expect(db.query("SELECT id FROM uploads WHERE id = ?").get(oldId)).toBeNull();
+  });
+});

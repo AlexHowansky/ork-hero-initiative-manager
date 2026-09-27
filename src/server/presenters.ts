@@ -69,7 +69,8 @@ export function presentCharacter(character: CharacterRow) {
     campaignId: character.campaign_id,
     kind: character.kind,
     name: character.name,
-    sheetUrl: `/characters/${character.id}`,
+    // Null for a character with no character file, which has no sheet to open.
+    sheetUrl: character.sheet_upload_id ? `/characters/${character.id}` : null,
     cardUrl: character.card_upload_id
       ? `/uploads/images/${character.card_upload_id}`
       : null,

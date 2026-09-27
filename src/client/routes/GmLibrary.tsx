@@ -360,14 +360,16 @@ function CharacterForm({
     }
   };
 
-  // The sheet leads: uploading it is the point of the dialog, and the fields
-  // below it are the filing — what this character is, where it belongs, what it
+  // The sheet leads: uploading it is usually the point of the dialog, and the
+  // fields below it are the filing — what this character is, where it belongs, what it
   // looks like — in the order someone answers them.
   return (
     <form onSubmit={submit} className="space-y-4">
       <FileDrop
         label={`Character file ${
-          character ? "(leave empty to keep the current one)" : "(.hdc from HERO Designer)"
+          character?.sheetUrl
+            ? "(leave empty to keep the current one)"
+            : "(optional, .hdc from HERO Designer)"
         }`}
         name="sheet"
         accept=".hdc"
@@ -1368,12 +1370,15 @@ export function GmLibrary({ email, onSignOut }: { email: string; onSignOut: () =
                             {/* `bare` on all three: glyphs alone, so they can sit into
                                 the corner of the picture. The campaign cards above are
                                 drawn the same way. */}
-                            <IconButton
-                              bare
-                              label={`View ${character.name}'s sheet`}
-                              icon={<SheetIcon />}
-                              onClick={() => setPreviewing(character)}
-                            />
+                            {/* A character filed without a file has no sheet to view. */}
+                            {character.sheetUrl ? (
+                              <IconButton
+                                bare
+                                label={`View ${character.name}'s sheet`}
+                                icon={<SheetIcon />}
+                                onClick={() => setPreviewing(character)}
+                              />
+                            ) : null}
                             <IconButton
                               bare
                               label={`Edit ${character.name}`}
@@ -1435,7 +1440,7 @@ export function GmLibrary({ email, onSignOut }: { email: string; onSignOut: () =
         </Modal>
       ) : null}
 
-      {previewing ? (
+      {previewing?.sheetUrl ? (
         <SheetOverlay
           src={previewing.sheetUrl}
           title={previewing.name}

@@ -207,7 +207,9 @@ The app should have the following features:
 
 * A game master may add, edit, and delete PCs and NPCs. These are represented by
   HERO Designer character file (`.hdc`) uploads, from which the app draws both
-  the character's sheet and the characteristics it tracks. Each PC and NPC must be categorized into one campaign. Each
+  the character's sheet and the characteristics it tracks. The file is optional:
+  a character may be added from the dialog with only a name and typed
+  characteristics, and has no sheet to view until a file is attached to it. Each PC and NPC must be categorized into one campaign. Each
   PC and NPC may have a card image. Either file may be chosen with the file
   picker or dropped onto its field; character files may also be dropped anywhere on the
   character panel, which files each of them as a PC of the selected campaign at

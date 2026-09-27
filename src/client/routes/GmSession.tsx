@@ -749,9 +749,11 @@ export function GmSessionConsole({ onSignOut }: { onSignOut: () => void }) {
                           one that has not walked on yet can still be read, and a
                           sheet is the character's rather than the copy's — two
                           goblins have one between them. */}
-                      <Button variant="ghost" onClick={() => setViewingSheet(character)}>
-                        <Icon icon={faEye} /> Sheet
-                      </Button>
+                      {character.sheetUrl ? (
+                        <Button variant="ghost" onClick={() => setViewingSheet(character)}>
+                          <Icon icon={faEye} /> Sheet
+                        </Button>
+                      ) : null}
                     </div>
                     {/* A hero is on the stage once and no more, so their Add goes
                         quiet rather than away — the ghosting is `Button`'s own
@@ -795,7 +797,7 @@ export function GmSessionConsole({ onSignOut }: { onSignOut: () => void }) {
         />
       </div>
 
-      {viewingSheet ? (
+      {viewingSheet?.sheetUrl ? (
         <SheetOverlay
           src={viewingSheet.sheetUrl}
           title={viewingSheet.name}

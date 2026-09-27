@@ -47,7 +47,7 @@ describe("one active session per campaign", () => {
     addActiveSession(target, "new", "2026-01-01T12:00:00.000Z");
 
     // Every migration after 001, which `atInitialSchema` has already applied.
-    expect(migrate(target)).toBe(15);
+    expect(migrate(target)).toBe(16);
 
     const statuses = Object.fromEntries(
       target.query<{ id: string; status: string }, []>(
@@ -472,5 +472,48 @@ describe("campaign names per game master", () => {
 
     // Within one library it still is, case and all.
     expect(() => add("c3", "gm1", "CAMPAIGN")).toThrow(/UNIQUE constraint/i);
+  });
+});
+
+describe("a character file is optional", () => {
+  test("the rebuild keeps characters, their slots and their claims", () => {
+    const target = atInitialSchema();
+    target.exec(`
+      INSERT INTO uploads VALUES
+        ('u1', 'sheet', 'sheets/u1', 'text/html', 10, 'sha', 'grognard.hdc',
+         '2026-01-01T00:00:00.000Z');
+      INSERT INTO characters (id, campaign_id, kind, name, sheet_upload_id, created_at, updated_at)
+        VALUES ('ch1', 'c1', 'pc', 'Grognard', 'u1', '2026-01-01T00:00:00.000Z',
+                '2026-01-01T00:00:00.000Z');
+    `);
+    migrate(target);
+    target.exec(`
+      INSERT INTO game_sessions (id, campaign_id, gm_id, code, status, turn, created_at)
+        VALUES ('s1', 'c1', 'gm1', 'S1', 'active', 1, '2026-01-01T00:00:00.000Z');
+      INSERT INTO session_characters (id, game_session_id, character_id, copy_number, position, added_at)
+        VALUES ('slot1', 's1', 'ch1', 1, 0, '2026-01-01T00:00:00.000Z');
+    `);
+
+    // Cascades still reach the rebuilt table's children.
+    target.exec("DELETE FROM characters WHERE id = 'ch1'");
+    expect(
+      target.query<{ count: number }, []>("SELECT COUNT(*) AS count FROM session_characters")
+        .get()!.count,
+    ).toBe(0);
+    expect(target.query("PRAGMA foreign_key_check").all()).toEqual([]);
+  });
+
+  test("a character can be filed with no sheet, and names stay unique", () => {
+    const target = atInitialSchema();
+    migrate(target);
+    const add = (id: string, name: string) =>
+      target.query(`
+        INSERT INTO characters (id, campaign_id, kind, name, sheet_upload_id, created_at, updated_at)
+        VALUES ($id, 'c1', 'npc', $name, NULL, '2026-01-01T00:00:00.000Z',
+                '2026-01-01T00:00:00.000Z')
+      `).run({ id, name });
+
+    expect(() => add("ch1", "Goblin")).not.toThrow();
+    expect(() => add("ch2", "GOBLIN")).toThrow(/UNIQUE constraint/i);
   });
 });

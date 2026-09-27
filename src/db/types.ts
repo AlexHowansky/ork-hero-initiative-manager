@@ -70,7 +70,8 @@ export interface CharacterRow {
   campaign_id: string;
   kind: CharacterKind;
   name: string;
-  sheet_upload_id: string;
+  /** Null for a character filed without a character file. */
+  sheet_upload_id: string | null;
   card_upload_id: string | null;
   /** HERO System characteristics. `endurance`, `stun` and `body` are the full totals. */
   speed: number;

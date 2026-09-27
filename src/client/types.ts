@@ -14,7 +14,8 @@ export interface Character {
   campaignId: string;
   kind: CharacterKind;
   name: string;
-  sheetUrl: string;
+  /** Null for a character filed without a character file: there is no sheet to open. */
+  sheetUrl: string | null;
   cardUrl: string | null;
   /**
    * The HERO System characteristics. `endurance`, `stun` and `body` are the
@@ -37,7 +38,7 @@ export interface Character {
  * `id` is the slot, not the character: it is the React key, and what a turn or a
  * removal names. The character in it is `characterId` —
  * what a claim is about, and what two copies of one NPC share. `sheetUrl` is the
- * character's too, so both copies open the same sheet.
+ * character's too, so both copies open the same sheet (or both have none).
  */
 export interface SessionCharacter extends Character {
   characterId: string;

@@ -437,7 +437,7 @@ export function PlayerSession({
             title="My character"
             className="lg:shrink-0"
             actions={
-              myCharacter ? (
+              myCharacter?.sheetUrl ? (
                 <Button onClick={() => setSheetOpen(true)}>My sheet</Button>
               ) : null
             }
@@ -623,7 +623,7 @@ export function PlayerSession({
       </div>
       </div>
 
-      {sheetOpen && myCharacter ? (
+      {sheetOpen && myCharacter?.sheetUrl ? (
         <SheetOverlay
           src={myCharacter.sheetUrl}
           title={myCharacter.name}
