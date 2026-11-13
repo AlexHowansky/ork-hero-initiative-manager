@@ -545,14 +545,25 @@ body {
   is what actually swaps them: each face disappears as it turns away, so the back
   face — parked at 180 degrees — is the one facing the reader for the second half
   of the turn.
+
+  The border is drawn on the faces, not on the tile. Only this inner layer
+  turns, so a border left on the tile stays where it is while the picture rotates
+  underneath it. The tile still works out the border's colour (from `CARD_BASE`
+  and the caller's classes, so hover and focus still apply) but draws it at zero
+  width. Each face inherits that colour and draws the border at the tile's old
+  width, so the box stays the same size and the border turns with the side it
+  belongs to. Unlayered, so the zero width beats the border-width utility.
 */
 .card-flip-tile {
   perspective: 40rem;
+  border-width: 0;
 }
 
 .card-flip {
   position: absolute;
   inset: 0;
+  border-color: inherit;
+  border-radius: inherit;
   transform-style: preserve-3d;
   /* Longer than the tilt's 0.5s: a half-turn covers thirty-six times the angle,
      and at the tilt's pace it is a snap rather than a card being turned over. */
@@ -568,6 +579,9 @@ body {
   inset: 0;
   display: flex;
   flex-direction: column;
+  border: var(--card-border) solid;
+  border-color: inherit;
+  border-radius: inherit;
   backface-visibility: hidden;
 }
 

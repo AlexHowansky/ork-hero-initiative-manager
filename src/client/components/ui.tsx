@@ -145,12 +145,14 @@ export const CARD_NAME = "card-name line-clamp-2 break-words text-center font-me
  * The hover and focus colours are `group-` variants because the pointer is never
  * actually over this element: `hover-3d`'s eight zones cover it and are its
  * siblings, not its children, so its own `:hover` never fires. The group is the
- * `hover-3d` wrapper, which the zones *are* inside.
+ * `hover-3d` wrapper, which the zones *are* inside. Focus means `:focus-visible`,
+ * not `:focus-within`, so a card clicked with the mouse does not stay lit after
+ * the pointer leaves it; reaching it by keyboard still lights it.
  *
  * Callers supply the border and background colours, which vary with selection.
  */
 export const CARD_BASE =
-  "card flex aspect-[5/7] flex-col overflow-hidden border-[length:var(--card-border)] shadow-sm group-hover:border-primary group-focus-within:border-primary";
+  "card flex aspect-[5/7] flex-col overflow-hidden border-[length:var(--card-border)] shadow-sm group-hover:border-primary group-has-[:focus-visible]:border-primary";
 
 /**
  * Where a control may sit inside the frame's window, which is not the window
