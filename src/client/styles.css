@@ -566,11 +566,22 @@ body {
   where it still rounds the corners and keeps the sheen to the card, but
   turns with the face rather than standing still around it. Unlayered, so
   `visible` beats both.
+
+  The rest of the tile's paint goes the same way as the border, and for the
+  same reason: the drop shadow (`shadow-sm` from `CARD_BASE`), the card stock
+  (the caller's `bg-base-100`) and `hover-3d`'s hairline outline would all
+  otherwise stand still as a ghost of the card while the faces turn inside it.
+  The tile paints none of them; each face paints its own background and
+  shadow, which `backface-visibility` hides along with the rest of the face as
+  it turns away. Unlayered, so these beat the utilities and daisyUI's sublayer.
 */
 .card-flip-tile {
   perspective: calc(var(--card-image-size) * 6);
   border-width: 0;
   overflow: visible;
+  background-color: transparent;
+  box-shadow: none;
+  outline: none;
 }
 
 .card-flip {
@@ -598,6 +609,7 @@ body {
   border-radius: inherit;
   overflow: hidden;
   backface-visibility: hidden;
+  @apply bg-base-100 shadow-sm;
 }
 
 .card-face-back {
