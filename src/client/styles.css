@@ -536,9 +536,14 @@ body {
   overwriting the other.
 
   `perspective` here rather than depending on the article's: the article's applies
-  to its own children, which is the `hover-3d` wrapper and not this. Shorter than
-  the 75rem the tilt uses, because the flip is a half-turn rather than a lean of a
-  few degrees, and at 75rem a half-turn reads as flat.
+  to its own children, which is the `hover-3d` wrapper and not this. Measured in
+  card widths rather than fixed, because the reader resizes cards and the depth
+  is what decides how far the card pokes out mid-turn: the edge swinging towards
+  the reader is drawn k/(k − ½) times its size at a distance of k widths. At six
+  widths that is about 9% taller, which pushes the card ~6% of its width past
+  its slot above and below. That fits the panel's scroll padding at ordinary
+  card sizes, and the panel scrolls, so it has to clip; nearer than this, the
+  top row loses its corners against the panel header.
 
   Both faces are absolute and stacked, which is what makes the box the height of
   the tile rather than of whichever face is showing. `backface-visibility: hidden`
@@ -553,10 +558,19 @@ body {
   width. Each face inherits that colour and draws the border at the tile's old
   width, so the box stays the same size and the border turns with the side it
   belongs to. Unlayered, so the zero width beats the border-width utility.
+
+  The tile does not clip a card with a back. Under perspective, the edge
+  swinging towards the reader is drawn larger than the card, so a clipping
+  tile cuts its corners off mid-turn. The clip (`overflow-hidden` from
+  `CARD_BASE`, plus `hover-3d`'s own) is moved down onto each face instead,
+  where it still rounds the corners and keeps the sheen to the card, but
+  turns with the face rather than standing still around it. Unlayered, so
+  `visible` beats both.
 */
 .card-flip-tile {
-  perspective: 40rem;
+  perspective: calc(var(--card-image-size) * 6);
   border-width: 0;
+  overflow: visible;
 }
 
 .card-flip {
@@ -582,6 +596,7 @@ body {
   border: var(--card-border) solid;
   border-color: inherit;
   border-radius: inherit;
+  overflow: hidden;
   backface-visibility: hidden;
 }
 
